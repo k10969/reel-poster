@@ -1,6 +1,9 @@
-# app.py  — Python 3.9 互換 / 元GUI仕様
+# app.py — Python 3.9 互換 / GUI準拠 + コア強制ロード＆診断エンドポイント内蔵
 import os
+import sys
 import json
+import traceback
+import importlib.util
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
@@ -8,19 +11,17 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     jsonify, abort, send_from_directory
 )
-
 from PIL import Image
 from moviepy.editor import VideoFileClip
 from dotenv import load_dotenv
 
-# ----------------- パス設定 -----------------
+# ----------------- パス -----------------
 BASE_DIR: Path = Path(__file__).resolve().parent
 STATIC_DIR: Path = BASE_DIR / "static"
 BG_DIR: Path = STATIC_DIR / "backgrounds"
 OV_DIR: Path = STATIC_DIR / "overlay_input"
 TH_DIR: Path = STATIC_DIR / "thumbs"
 
-# 元ツールと同じ場所（プロジェクト直下）に保存
 ORDER_JSON: Path = BASE_DIR / "materials_order.json"
 OVERRIDES_JSON: Path = BASE_DIR / "material_overrides.json"
 RANDOM_TXT: Path = BASE_DIR / "random_texts.txt"
@@ -28,7 +29,7 @@ RANDOM_TXT: Path = BASE_DIR / "random_texts.txt"
 for d in (STATIC_DIR, BG_DIR, OV_DIR, TH_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-# ----------------- 設定ストア（存在すれば利用） -----------------
+# ----------------- 設定ストア（あれば settings_store） -----------------
 try:
     from settings_store import (
         load_accounts as _load_accounts,
@@ -36,7 +37,6 @@ try:
         cloud_restore, cloud_backup,
     )
 except Exception:
-    # フォールバック: 単純な json 保存
     ACCOUNTS_PATH = BASE_DIR / "accounts.json"
 
     def _read_json(p: Path, default):
@@ -66,16 +66,38 @@ except Exception:
     def cloud_backup():
         return {}
 
-# ----------------- 生成→Cloudinary→IG投稿コア -----------------
+# ----------------- コア（生成→Cloudinary→IG投稿）をインポート（失敗時は直読みで再トライ） -----------------
+PosterCoreReel = None
+core_import_error = ""
+
+def _manual_import_core():
+    """poster_core_reel.py をファイル直読みでロード（通常 import が失敗したときの保険）"""
+    global PosterCoreReel, core_import_error
+    core_path = BASE_DIR / "poster_core_reel.py"
+    if not core_path.exists():
+        core_import_error = f"poster_core_reel.py not found at {core_path}"
+        return
+    try:
+        spec = importlib.util.spec_from_file_location("poster_core_reel", str(core_path))
+        mod = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(mod)  # type: ignore
+        PosterCoreReel = getattr(mod, "PosterCoreReel", None)
+        if PosterCoreReel is None:
+            core_import_error = "PosterCoreReel class not found in poster_core_reel.py"
+    except Exception as e:
+        core_import_error = f"manual import failed: {e}\n{traceback.format_exc()}"
+
 try:
-    # あなたのコア（poster_core_reel.py）を使います
-    from poster_core_reel import PosterCoreReel
-except Exception:
-    PosterCoreReel = None  # 起動は通す。/post 叩いたら 500 を返す
+    from poster_core_reel import PosterCoreReel as _PCR
+    PosterCoreReel = _PCR
+except Exception as e:
+    core_import_error = f"normal import failed: {e}\n{traceback.format_exc()}"
+    # ファイル直読みで再トライ
+    _manual_import_core()
 
 load_dotenv()
 try:
-    # クラウドから設定復元（実装されていれば）
     cloud_restore()
 except Exception:
     pass
@@ -92,9 +114,6 @@ def list_media(dirpath: Path, exts: Tuple[str, ...]) -> List[str]:
 
 def is_video_name(name: str) -> bool:
     return Path(name).suffix.lower() in (".mp4", ".mov", ".m4v", ".webm")
-
-def is_image_name(name: str) -> bool:
-    return Path(name).suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
 
 def load_order() -> List[str]:
     if ORDER_JSON.exists():
@@ -113,7 +132,6 @@ def load_overrides() -> Dict[str, str]:
         try:
             d = json.loads(OVERRIDES_JSON.read_text("utf-8"))
             if isinstance(d, dict):
-                # 文字列以外は空扱い
                 return {str(k): (v if isinstance(v, str) else "") for k, v in d.items()}
         except Exception:
             pass
@@ -124,9 +142,6 @@ def save_overrides(js: Dict[str, str]) -> None:
     OVERRIDES_JSON.write_text(json.dumps(js, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def ensure_thumb(src_path: Path) -> str:
-    """
-    サムネを作って /static/thumbs/<filename>.jpg を返す（失敗時は ""）
-    """
     th_name = src_path.name + ".jpg"
     th_path = TH_DIR / th_name
     if th_path.exists():
@@ -147,18 +162,11 @@ def ensure_thumb(src_path: Path) -> str:
         return ""
 
 def _custom_text_for(filename: str) -> Optional[str]:
-    """
-    各素材に対するテキスト上書きを返す。空なら None（⇒ コア側で random_texts.txt を使用）
-    """
     ov = load_overrides()
     txt = (ov.get(filename) or "").strip()
     return txt if txt else None
 
 def _pick_background_for_account(account_no: int) -> Optional[Path]:
-    """
-    背景はアカウント番号に自動連動。
-    優先： '1.mp4' → 'background1.mp4' → 'bg1.mp4' → 背景フォルダの先頭
-    """
     patterns = [f"{account_no}.mp4", f"background{account_no}.mp4", f"bg{account_no}.mp4"]
     for name in patterns:
         p = BG_DIR / name
@@ -172,13 +180,11 @@ def _pick_background_for_account(account_no: int) -> Optional[Path]:
 def index():
     ov_raw = list_media(OV_DIR, (".mp4", ".mov", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp"))
     order = load_order()
-    # 並び順 + 未登録分を後ろに
     ordered = [n for n in order if n in ov_raw] + [n for n in ov_raw if n not in order]
     overrides = load_overrides()
     ov_rows = [{"name": n, "thumb": ensure_thumb(OV_DIR / n), "text": overrides.get(n, "")} for n in ordered]
     return render_template("index.html", ov_rows=ov_rows)
 
-# 静的ファイル直配信（/static/〜）
 @app.route("/static/<path:subpath>")
 def static_passthrough(subpath: str):
     target = STATIC_DIR / subpath
@@ -186,7 +192,6 @@ def static_passthrough(subpath: str):
         abort(404)
     return send_from_directory(STATIC_DIR, subpath)
 
-# 素材プレビュー（別タブ）
 @app.route("/preview/overlay_input/<filename>")
 def preview_overlay(filename: str):
     path = OV_DIR / filename
@@ -199,7 +204,6 @@ def preview_overlay(filename: str):
     return f"<h3 style='font-family:system-ui'>Preview: {filename}</h3>{body}<p><a href='/'>戻る</a></p>"
 
 # ----------------- CRUD API -----------------
-# 素材アップロード（iPhoneから）
 @app.route("/upload", methods=["POST"])
 def upload():
     target = request.args.get("target", "overlay")
@@ -215,7 +219,6 @@ def upload():
         ensure_thumb(dest)
     except Exception:
         pass
-    # 素材なら並び順の末尾へ
     if dest_dir == OV_DIR:
         order = load_order()
         if safe_name not in order:
@@ -223,18 +226,15 @@ def upload():
             save_order(order)
     return redirect(url_for("index"))
 
-# 並び順＆テキストを自動保存
 @app.route("/materials/sync", methods=["POST"])
 def materials_sync():
     js = request.get_json(silent=True) or {}
     order = js.get("order", [])
     texts = js.get("texts", {})
-    # 並び順
     if isinstance(order, list):
         ex = set(list_media(OV_DIR, (".mp4", ".mov", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp")))
         order = [n for n in order if n in ex]
         save_order(order)
-    # 上書きテキスト
     if isinstance(texts, dict):
         cur = load_overrides()
         for k, v in texts.items():
@@ -242,7 +242,6 @@ def materials_sync():
         save_overrides(cur)
     return jsonify({"ok": True})
 
-# 素材削除
 @app.route("/materials/delete", methods=["POST"])
 def materials_delete():
     filename = request.form.get("filename", "") or (request.get_json(silent=True) or {}).get("filename", "")
@@ -269,7 +268,6 @@ def materials_delete():
         save_overrides(ov)
     return redirect(url_for("index"))
 
-# ランダムテキスト取得/保存
 @app.route("/random_texts_content")
 def random_texts_content():
     txt = RANDOM_TXT.read_text("utf-8") if RANDOM_TXT.exists() else ""
@@ -281,7 +279,7 @@ def random_texts_update():
     RANDOM_TXT.write_text(body, encoding="utf-8")
     return ("", 204)
 
-# アカウント一覧/追加/削除（画面から編集可能）
+# アカウント一覧/追加/削除
 @app.route("/accounts", methods=["GET"])
 def accounts_list():
     return jsonify(_load_accounts())
@@ -327,30 +325,17 @@ def accounts_delete():
     _save_accounts(accs)
     return {"ok": True}
 
-# ----------------- 投稿ディスパッチ（元GUI仕様） -----------------
+# ----------------- 投稿ディスパッチ -----------------
 @app.route("/post", methods=["POST"])
 def post_dispatch():
-    """
-    JSON:
-    {
-      "overlay_names": ["IMG_1234.jpg", ...]  # 行選択があるときはその配列、無ければ空でOK（サーバ側が全件にする）
-      "all_accounts": true/false,             # 全アカウント（分散投稿）
-      "account_no": "1"                       # all_accounts=false の時だけ必須
-    }
-    動作:
-      - overlay_names が空 → materials_order.json の順で全件
-      - all_accounts=true → 登録済みの全アカウントに対し順番に投稿
-      - 背景はアカウント番号に連動（1→1.mp4 / background1.mp4 / bg1.mp4 / 先頭フォールバック）
-      - 各素材のテキストは material_overrides.json を優先、空なら core 側で random_texts.txt を用いる
-    """
     if PosterCoreReel is None:
-        return {"ok": False, "error": "PosterCoreReel not available (import failed)"}, 500
+        return {"ok": False, "error": f"PosterCoreReel not available (import failed) :: {core_import_error}"}, 500
 
     data = request.get_json(silent=True) or {}
     overlay_names = data.get("overlay_names") or []
     all_accounts = bool(data.get("all_accounts", False))
 
-    # 並び順を採用
+    # 並び順採用（未指定時）
     if not overlay_names:
         order = load_order()
         overlay_names = [n for n in order if (OV_DIR / n).exists()]
@@ -363,6 +348,20 @@ def post_dispatch():
     core = PosterCoreReel()
     results: List[Dict[str, str]] = []
 
+    def _custom_text_for(filename: str) -> Optional[str]:
+        ov = load_overrides()
+        txt = (ov.get(filename) or "").strip()
+        return txt if txt else None
+
+    def _pick_background_for_account(account_no: int) -> Optional[Path]:
+        patterns = [f"{account_no}.mp4", f"background{account_no}.mp4", f"bg{account_no}.mp4"]
+        for name in patterns:
+            p = BG_DIR / name
+            if p.exists():
+                return p
+        bg_list = list_media(BG_DIR, (".mp4", ".mov", ".m4v", ".webm"))
+        return (BG_DIR / bg_list[0]) if bg_list else None
+
     def _post_for_account(account_no: int) -> None:
         bg = _pick_background_for_account(account_no)
         if not bg or not bg.exists():
@@ -370,7 +369,7 @@ def post_dispatch():
             return
         for name in overlay_names:
             ov = OV_DIR / name
-            custom = _custom_text_for(name)
+            custom = _custom_text_for(name)  # 空なら None（→ コアが random_texts.txt を使う）
             try:
                 media_id = core.post_reel(
                     account_no=account_no,
@@ -383,28 +382,56 @@ def post_dispatch():
             except Exception as e:
                 results.append({"account_no": str(account_no), "name": name, "ok": False, "error": f"{type(e).__name__}: {e}"})
 
-    if all_accounts:
+    if bool(data.get("all_accounts", False)):
         accs = _load_accounts().get("accounts", [])
-        # 番号昇順に処理
         def parse_no(x):
-            try:
-                return int(str(x.get("no", "")).strip())
-            except Exception:
-                return 0
+            try: return int(str(x.get("no","")).strip())
+            except: return 0
         for acc in sorted(accs, key=parse_no):
             no = parse_no(acc)
             if no > 0:
                 _post_for_account(no)
     else:
+        accs = _load_accounts().get("accounts", [])
+        def parse_no(x):
+            try: return int(str(x.get("no","")).strip())
+            except: return 0
         try:
-            account_no = int(str(data.get("account_no")).strip())
+            account_no = int(str(data.get("account_no", "")).strip())
         except Exception:
-            return {"ok": False, "error": "account_no required when all_accounts=false"}, 400
+            account_no = 0
+        if account_no <= 0 and accs:
+            accs_sorted = sorted(accs, key=parse_no)
+            if accs_sorted and parse_no(accs_sorted[0]) > 0:
+                account_no = parse_no(accs_sorted[0])
+        if account_no <= 0:
+            return {"ok": False, "error": "no valid account available"}, 400
         _post_for_account(account_no)
 
     return {"ok": True, "results": results}
 
+# ----------------- 診断エンドポイント -----------------
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "core": (PosterCoreReel is not None),
+        "python": sys.version.split()[0],
+        "cwd": str(BASE_DIR),
+    }
+
+@app.get("/_import_probe")
+def import_probe():
+    files = [p.name for p in BASE_DIR.iterdir() if p.is_file()]
+    return {
+        "core_present": (BASE_DIR / "poster_core_reel.py").exists(),
+        "core_class": (PosterCoreReel is not None),
+        "core_error": core_import_error,
+        "cwd": str(BASE_DIR),
+        "files": sorted(files),
+        "sys_path_head": sys.path[:6],
+    }
+
 # ----------------- 起動 -----------------
 if __name__ == "__main__":
-    # ローカル確認用
     app.run(host="0.0.0.0", port=8000, debug=True)
