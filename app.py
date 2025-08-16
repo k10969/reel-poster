@@ -10,55 +10,11 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-# MoviePy 1.0.3 互換
+# MoviePy 1.0.3 想定
 from moviepy.editor import VideoFileClip, CompositeVideoClip, ImageClip, vfx
 from PIL import Image, ImageDraw, ImageFont
-import numpy as np  # ImageClip(PIL画像)を確実に通すため
+import numpy as np
 
-# ==== アカウント保存（UI用。GraphAPIは未接続） ====
-ACCOUNTS_JSON = BASE_DIR / "accounts.json"
-
-def _load_accounts():
-    if ACCOUNTS_JSON.exists():
-        try:
-            return json.loads(ACCOUNTS_JSON.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {"accounts": []}
-
-def _save_accounts(obj):
-    ACCOUNTS_JSON.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-
-@app.route("/accounts", methods=["GET"])
-def accounts_list():
-    return _load_accounts()
-
-@app.route("/accounts/upsert", methods=["POST"])
-def accounts_upsert():
-    data = request.get_json(silent=True) or {}
-    no = str(data.get("no","")).strip()
-    if not no:
-        return {"ok": False, "error": "no required"}, 400
-    accs = _load_accounts()
-    # 既存置き換え or 追加
-    found = False
-    for a in accs["accounts"]:
-        if str(a.get("no","")) == no:
-            a.update({
-                "no": no,
-                "label": data.get("label",""),
-                "ig_user_id": data.get("ig_user_id",""),
-                "page_id": data.get("page_id","")
-            })
-            found = True
-            break
-    if not found:
-        accs["accounts"].append({
-            "no": no,
-            "label": data.get("label",""),
-            "ig_user_id
-
-# ========= 基本設定 =========
 BASE_DIR = Path(__file__).parent.resolve()
 STATIC_DIR = BASE_DIR / "static"
 BACKGROUND_DIR = STATIC_DIR / "backgrounds"
@@ -67,8 +23,9 @@ THUMB_DIR = STATIC_DIR / "thumbs"
 OUTPUT_DIR = STATIC_DIR / "output"
 RANDOM_TXT = BASE_DIR / "random_texts.txt"
 
-MATERIALS_ORDER = BASE_DIR / "materials_order.json"      # ["a.jpg","b.mp4",...]
-MATERIAL_OVERRIDES = BASE_DIR / "material_overrides.json"  # {"a.jpg":{"text":"..."}}
+MATERIALS_ORDER = BASE_DIR / "materials_order.json"
+MATERIAL_OVERRIDES = BASE_DIR / "material_overrides.json"
+ACCOUNTS_JSON = BASE_DIR / "accounts.json"
 
 ALLOWED_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
@@ -80,22 +37,12 @@ for p in (BACKGROUND_DIR, OVERLAY_DIR, THUMB_DIR, OUTPUT_DIR):
 if not RANDOM_TXT.exists():
     RANDOM_TXT.write_text("やばい\nおもしろすぎる\nこれすごい\n", encoding="utf-8")
 
-# サムネを重い環境で無効化したい時は DISABLE_THUMBS=1 を環境変数に
 DISABLE_THUMBS = os.getenv("DISABLE_THUMBS") == "1"
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512MB
 
-@app.route("/random_texts", methods=["GET", "POST"])
-def random_texts():
-    if request.method == "POST":
-        txt = request.form.get("content","")
-        RANDOM_TXT.write_text(txt, encoding="utf-8")
-        return redirect(url_for("random_texts"))
-    content = RANDOM_TXT.read_text(encoding="utf-8") if RANDOM_TXT.exists() else ""
-    return render_template("random_texts.html", content=content)
-
-# ========= ユーティリティ =========
+# -------- utils --------
 def is_allowed(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTS
 
@@ -127,7 +74,6 @@ def ensure_thumbnail(src_path: Path, thumb_path: Path, width: int = 320) -> None
 def safe_join(folder: Path, filename: str) -> Path:
     name = secure_filename(filename)
     p = folder / name
-    # Path.is_relative_to は 3.9+ で可
     if not p.resolve().is_relative_to(folder.resolve()):
         abort(400)
     return p
@@ -139,7 +85,7 @@ def calc_position(pos_key: str, bg_w: int, bg_h: int, ov_w: int, ov_h: int) -> T
         "top-right": (bg_w - ov_w - m, m),
         "bottom-left": (m, bg_h - ov_h - m),
         "bottom-right": (bg_w - ov_w - m, bg_h - ov_h - m),
-        "center": ((bg_w - ov_w)//2, (bg_h - ov_h)//2)
+        "center": ((bg_w - ov_w) // 2, (bg_h - ov_h) // 2),
     }
     return mapping.get(pos_key, mapping["top-right"])
 
@@ -178,7 +124,7 @@ def _load_json(p: Path, default):
 def _save_json(p: Path, obj):
     p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# ========= ルーティング =========
+# -------- routes --------
 @app.route("/")
 def index():
     bgs = list_files_sorted(BACKGROUND_DIR)
@@ -199,7 +145,7 @@ def index():
 
     # 並び順＆テキスト上書き
     order = _load_json(MATERIALS_ORDER, [])
-    overrides = _load_json(MATERIAL_OVERRIDES, {})  # {filename: {"text": "…"}}
+    overrides = _load_json(MATERIAL_OVERRIDES, {})
 
     ov_set = set(ovs)
     ordered = [f for f in order if f in ov_set] + [f for f in ovs if f not in order]
@@ -220,8 +166,7 @@ def index():
             "text": text_override
         })
 
-    outs_rows = outs
-    return render_template("index.html", bg_rows=bg_rows, ov_rows=ov_rows, outs_rows=outs_rows)
+    return render_template("index.html", bg_rows=bg_rows, ov_rows=ov_rows, outs_rows=outs)
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -242,7 +187,7 @@ def upload():
     except Exception:
         pass
 
-    # 新規追加分を materials_order に足す（末尾）
+    # 新規素材は order の末尾へ
     if target != "backgrounds":
         order = _load_json(MATERIALS_ORDER, [])
         if fname not in order:
@@ -265,12 +210,12 @@ def preview(kind: str, filename: str):
                            file_url=f"static/{kind}/{filename}",
                            is_video=is_video(filename))
 
-# 並び順＆テキストを保存
+# 並び順・テキスト保存
 @app.route("/materials/sync", methods=["POST"])
 def materials_sync():
     data = request.get_json(silent=True) or {}
-    order = data.get("order", [])           # ["file1.jpg", ...]
-    texts = data.get("texts", {})           # {"file1.jpg": "テキスト", ...}
+    order = data.get("order", [])
+    texts = data.get("texts", {})
 
     current = {f.name for f in OVERLAY_DIR.iterdir() if f.is_file() and is_allowed(f.name)}
     cleaned_order = [f for f in order if f in current]
@@ -290,7 +235,6 @@ def materials_delete():
     path = safe_join(OVERLAY_DIR, filename)
     if not path.exists():
         abort(404)
-
     try:
         path.unlink(missing_ok=True)
         (THUMB_DIR / f"ov__{filename}.jpg").unlink(missing_ok=True)
@@ -313,11 +257,11 @@ def combine():
     ov = request.form.get("overlay")
     pos = request.form.get("pos", "top-right")
     size_pct = float(request.form.get("size_pct", "50"))
-    duration_mode = request.form.get("duration_mode", "shortest")  # shortest|background
-    fadein = float(request.form.get("fadein", "0"))  # seconds
+    duration_mode = request.form.get("duration_mode", "shortest")
+    fadein = float(request.form.get("fadein", "0"))
 
-    text_enable = request.form.get("text_enable") == "on"
-    text_mode = request.form.get("text_mode", "custom")  # custom|random
+    text_enable = request.get_json(silent=True) is None and (request.form.get("text_enable") == "on")
+    text_mode = request.form.get("text_mode", "custom")
     text_input = request.form.get("text_input", "")
     text_size = int(request.form.get("text_size", "64"))
     text_pos = request.form.get("text_pos", "top-left")
@@ -347,11 +291,10 @@ def combine():
                     "top-right": (bg_w - overlay_w - m, m),
                     "bottom-left": (m, bg_h - overlay_h - m),
                     "bottom-right": (bg_w - overlay_w - m, bg_h - overlay_h - m),
-                    "center": ((bg_w - overlay_w)//2, (bg_h - overlay_h)//2)
+                    "center": ((bg_w - overlay_w)//2, (bg_h - overlay_h)//2),
                 }
                 return mapping.get(pos, mapping["top-right"])
 
-            # 素材テキスト（上書き優先）
             overrides = _load_json(MATERIAL_OVERRIDES, {})
             override_text = overrides.get(ov_path.name, {}).get("text", "").strip()
             candidate = (text_input or "").strip() or override_text
@@ -388,7 +331,7 @@ def combine():
                     final.write_videofile(
                         str(out_path),
                         codec="libx264", audio_codec="aac",
-                        threads=2,  # 省メモリ
+                        threads=2,
                         fps=bg_clip.fps if bg_clip.fps else 30,
                         preset="medium"
                     )
@@ -450,7 +393,70 @@ def static_passthrough(subpath: str):
         abort(404)
     return send_from_directory(STATIC_DIR, subpath)
 
+# ---- Accounts (UI保存のみ) ----
+def _load_accounts():
+    if ACCOUNTS_JSON.exists():
+        try:
+            return json.loads(ACCOUNTS_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"accounts": []}
+
+def _save_accounts(obj):
+    ACCOUNTS_JSON.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+@app.route("/accounts", methods=["GET"])
+def accounts_list():
+    return _load_accounts()
+
+@app.route("/accounts/upsert", methods=["POST"])
+def accounts_upsert():
+    data = request.get_json(silent=True) or {}
+    no = str(data.get("no", "")).strip()
+    if not no:
+        return {"ok": False, "error": "no required"}, 400
+    accs = _load_accounts()
+    found = False
+    for a in accs["accounts"]:
+        if str(a.get("no", "")) == no:
+            a.update({
+                "no": no,
+                "label": data.get("label", ""),
+                "ig_user_id": data.get("ig_user_id", ""),
+                "page_id": data.get("page_id", "")
+            })
+            found = True
+            break
+    if not found:
+        accs["accounts"].append({
+            "no": no,
+            "label": data.get("label", ""),
+            "ig_user_id": data.get("ig_user_id", ""),
+            "page_id": data.get("page_id", "")
+        })
+    _save_accounts(accs)
+    return {"ok": True}
+
+@app.route("/accounts/delete", methods=["POST"])
+def accounts_delete():
+    data = request.get_json(silent=True) or {}
+    no = str(data.get("no", "")).strip()
+    if not no:
+        return {"ok": False, "error": "no required"}, 400
+    accs = _load_accounts()
+    accs["accounts"] = [a for a in accs["accounts"] if str(a.get("no", "")) != no]
+    _save_accounts(accs)
+    return {"ok": True}
+
+@app.route("/random_texts", methods=["GET", "POST"])
+def random_texts():
+    if request.method == "POST":
+        txt = request.form.get("content", "")
+        RANDOM_TXT.write_text(txt, encoding="utf-8")
+        return redirect(url_for("random_texts"))
+    content = RANDOM_TXT.read_text(encoding="utf-8") if RANDOM_TXT.exists() else ""
+    return render_template("random_texts.html", content=content)
+
 if __name__ == "__main__":
-    # ローカル実行用
     app.run(host="0.0.0.0", port=5000, debug=True)
 

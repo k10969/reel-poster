@@ -37,9 +37,8 @@
 </head>
 <body>
 
-<!-- 上部タブ -->
 <div class="toolbar">
-  <div class="tab active" onclick="/* 投稿タブ */ 0">投稿</div>
+  <div class="tab active" onclick="0">投稿</div>
   <div class="tab" onclick="location.href='/random_texts'">ランダムテキスト</div>
   <div class="tab" onclick="alert('投稿ログは後で実装できます')">投稿ログ</div>
   <div class="right">
@@ -49,7 +48,6 @@
 
 <div class="wrap">
 
-  <!-- アカウント管理 -->
   <div class="panel">
     <div class="panel-hd">アカウント選択</div>
     <div class="panel-bd">
@@ -72,12 +70,11 @@
         <button onclick="reloadAcc()">更新</button>
       </div>
       <div class="muted" style="margin-top:6px">
-        アカウントは <code>accounts.json</code> に保存されます（このWeb版はAPI連携なし・見た目合わせ。GraphAPIは後で接続可）。
+        アカウントは <code>accounts.json</code> に保存（UIのみ。GraphAPI接続は後から可）。
       </div>
     </div>
   </div>
 
-  <!-- 素材一覧 -->
   <div class="panel">
     <div class="panel-hd">overlay_input の素材一覧（外部DND=移動、行DND=順序変更、右列ダブルクリックでテキスト編集、サムネダブルクリックで拡大）</div>
     <div class="panel-bd">
@@ -134,5 +131,176 @@
 
       <div class="footer">
         <div class="row">
-          <button class="prima
+          <button class="primary" onclick="saveMaterials()">更新</button>
+          <div class="muted">順序とテキストを保存します（materials_order.json / material_overrides.json）。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-hd">合成（今のツール準拠）</div>
+    <div class="panel-bd">
+      <form action="/combine" method="post" class="row" style="gap:12px;align-items:flex-end;">
+        <div>
+          <label>背景</label><br>
+          <select name="background" required>
+            {% for name, _ in bg_rows %}
+              <option value="{{ name }}">{{ name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>素材</label><br>
+          <select id="overlaySelect" name="overlay" required>
+            {% for item in ov_rows %}
+              <option value="{{ item.name }}">{{ item.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>位置</label><br>
+          <select name="pos">
+            <option value="top-right">右上</option>
+            <option value="top-left">左上</option>
+            <option value="bottom-right">右下</option>
+            <option value="bottom-left">左下</option>
+            <option value="center">中央</option>
+          </select>
+        </div>
+        <div>
+          <label>サイズ(%)</label><br>
+          <input type="text" name="size_pct" value="50" style="width:90px">
+        </div>
+        <div>
+          <label>長さ</label><br>
+          <select name="duration_mode">
+            <option value="shortest">短い方に合わせる</option>
+            <option value="background">背景に合わせる</option>
+          </select>
+        </div>
+        <div>
+          <label>フェードイン(s)</label><br>
+          <input type="text" name="fadein" value="0" style="width:90px">
+        </div>
+        <div style="width:100%"></div>
+        <div><label><input type="checkbox" name="text_enable" checked> テキスト（有効時）</label></div>
+        <div>
+          <label>テキストモード</label><br>
+          <select name="text_mode">
+            <option value="custom">素材のテキスト/入力を使う</option>
+            <option value="random">ランダム</option>
+          </select>
+        </div>
+        <div>
+          <label>（任意）テキスト入力</label><br>
+          <input type="text" name="text_input" placeholder="ここに入れると最優先" style="width:260px">
+        </div>
+        <div>
+          <label>テキスト位置</label><br>
+          <select name="text_pos">
+            <option value="top-left">左上</option>
+            <option value="top-right">右上</option>
+            <option value="bottom-left">左下</option>
+            <option value="bottom-right">右下</option>
+            <option value="center">中央</option>
+          </select>
+        </div>
+        <div>
+          <label>テキストサイズ</label><br>
+          <input type="text" name="text_size" value="64" style="width:90px">
+        </div>
+        <div><button class="primary" type="submit">選択生成</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-hd">進捗</div>
+    <div class="panel-bd">
+      <div class="muted" id="status">待機中</div>
+      <div class="progress" style="margin-top:8px"><div class="bar" id="bar"></div></div>
+      <div class="footer" style="display:flex;gap:8px;justify-content:flex-end">
+        <button disabled>停止</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-hd">出力（output）</div>
+    <div class="panel-bd">
+      <div class="row" style="flex-wrap:wrap;gap:12px">
+        {% for out in outs_rows %}
+          <div style="width:320px">
+            <video controls playsinline preload="metadata" src="{{ url_for('static_passthrough', subpath='output/' ~ out) }}" style="width:100%;border:1px solid #eee;border-radius:6px"></video>
+            <div class="row" style="justify-content:space-between">
+              <div class="muted" style="font-size:12px">{{ out }}</div>
+              <button onclick="location.href='{{ url_for('download_output', filename=out) }}'">DL</button>
+            </div>
+          </div>
+        {% endfor %}
+        {% if outs_rows|length == 0 %}
+          <div class="muted">まだ生成物がありません。</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  new Sortable(document.getElementById('tbl'), {animation:150, handle:'.handle', ghostClass:'dragging'});
+
+  function chooseForCombine(name){
+    const sel = document.getElementById('overlaySelect');
+    [...sel.options].forEach(o => { if(o.value===name) o.selected = true; });
+    window.scrollTo({top: document.body.scrollHeight, behavior:'smooth'});
+  }
+
+  async function saveMaterials(){
+    const rows = [...document.querySelectorAll('#tbl tr[data-fname]')];
+    const order = rows.map(r => r.dataset.fname);
+    const texts = {};
+    rows.forEach(r => { texts[r.dataset.fname] = r.querySelector('input.txt').value; });
+    const res = await fetch('/materials/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order,texts})});
+    alert(res.ok ? '更新しました' : '保存に失敗しました');
+  }
+
+  function startBatch(){
+    document.getElementById('status').textContent = '投稿キュー作成中…（UIのみ。GraphAPIは未接続）';
+    let w=0; const bar=document.getElementById('bar');
+    const t=setInterval(()=>{ w=Math.min(100,w+5); bar.style.width=w+'%'; if(w>=100) clearInterval(t); },100);
+  }
+
+  async function reloadAcc(){
+    const r = await fetch('/accounts'); const js = await r.json();
+    const sel = document.getElementById('accSelect'); sel.innerHTML='';
+    js.accounts.forEach(a => {
+      const opt=document.createElement('option');
+      opt.value=a.no; opt.textContent=`${a.no}. ${a.label} (IG:${a.ig_user_id} / Page:${a.page_id})`;
+      sel.appendChild(opt);
+    });
+  }
+  async function upsertAcc(){
+    const body = {
+      no: document.getElementById('accNo').value.trim(),
+      label: document.getElementById('accLabel').value.trim(),
+      ig_user_id: document.getElementById('accIG').value.trim(),
+      page_id: document.getElementById('accPage').value.trim()
+    };
+    const r = await fetch('/accounts/upsert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){ alert('保存しました'); reloadAcc(); }
+  }
+  async function delAcc(){
+    const no = document.getElementById('accNo').value.trim();
+    if(!no) return alert('番号を入れてください');
+    const r = await fetch('/accounts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({no})});
+    if(r.ok){ alert('削除しました'); reloadAcc(); }
+  }
+  function tokenRefresh(){ alert('トークン更新（UIのみ）'); }
+  function tokenCheck(){ alert('トークン有効期限チェック（UIのみ）'); }
+  reloadAcc();
+</script>
+</body>
+</html>
 
