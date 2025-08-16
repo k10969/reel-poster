@@ -1,3 +1,4 @@
+# poster_core_reel.py
 import os
 import random
 import logging
@@ -7,20 +8,28 @@ import numpy as np
 from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
 from PIL import Image, ImageDraw, ImageFont
 
-import poster_core_reel_graph_accounts as igpub
-from cloudinary_uploader import upload_video_get_urls
+# 依存の存在チェック（どこで落ちたか分かるように）
+_missing = []
+try:
+    import poster_core_reel_graph_accounts as igpub
+except Exception as e:
+    _missing.append(f"poster_core_reel_graph_accounts import error: {e}")
+try:
+    from cloudinary_uploader import upload_video_get_urls
+except Exception as e:
+    _missing.append(f"cloudinary_uploader import error: {e}")
 
 SUPPORTED_EXTS = {"jpg", "jpeg", "png", "bmp", "gif", "webp", "mp4", "mov", "m4v", "avi", "mkv", "webm"}
 
 BASE_DIR = Path(__file__).parent.resolve()
-OVERLAY_DIR = BASE_DIR / "overlay_input"
-OUTPUT_DIR = BASE_DIR / "output"
+OVERLAY_DIR = BASE_DIR / "static" / "overlay_input"
+OUTPUT_DIR = BASE_DIR / "static" / "output"   # 出力は一時的にここを使用
 TEXT_FILE = BASE_DIR / "random_texts.txt"
 OVERRIDES_JSON = BASE_DIR / "material_overrides.json"
 FONT_PATH = Path(os.environ.get("REEL_FONT_PATH", ""))
 LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 LOG = logging.getLogger("poster_core_reel")
 if not LOG.handlers:
@@ -39,6 +48,10 @@ class PosterCoreReel:
     動画合成 → Cloudinary → Graph API 投稿
     “custom_overlay_text” が空なら random_texts.txt から選ぶ
     """
+    def __init__(self):
+        if _missing:
+            # 依存不足を早めに可視化
+            raise ImportError("; ".join(_missing))
 
     def post_reel(
         self,
