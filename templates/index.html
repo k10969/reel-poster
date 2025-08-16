@@ -1,412 +1,317 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>投稿ツール</title>
-<style>
-  :root{--bd:#e5e7eb;--mut:#6b7280;--ok:#10b981;--err:#ef4444}
-  *{box-sizing:border-box}
-  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;margin:16px}
-  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-  .tab{padding:8px 12px;border:1px solid var(--bd);border-radius:8px;background:#fff;cursor:pointer}
-  .tab.active{background:#111827;color:#fff;border-color:#111827}
-  .section{display:none}
-  .section.active{display:block}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-  .btn{height:34px;padding:0 12px;border:1px solid var(--bd);background:#fff;border-radius:6px;cursor:pointer}
-  .btn.primary{background:var(--ok);color:#fff;border-color:var(--ok)}
-  .btn.danger{background:#fff;color:#b91c1c;border-color:#ef4444}
-  .btn:disabled{opacity:.5;cursor:not-allowed}
-  .sel, .txt{height:34px;border:1px solid var(--bd);border-radius:6px;padding:0 8px}
-  .txt{height:auto;min-height:34px}
-  .card{border:1px solid var(--bd);border-radius:10px;padding:10px;background:#fff}
-  table{width:100%;border-collapse:collapse}
-  th,td{border-bottom:1px solid var(--bd);padding:10px;vertical-align:top}
-  th{background:#f9fafb;text-align:left;font-weight:600}
-  tbody tr.sel{background:#eff6ff}
-  img.thumb{width:140px;height:140px;object-fit:cover;border:1px solid var(--bd);border-radius:6px;display:block}
-  .muted{color:var(--mut);font-size:12px}
-  textarea{width:100%;min-height:70px;border:1px solid var(--bd);border-radius:8px;padding:8px;resize:vertical}
-  .progress{height:10px;background:#f3f4f6;border-radius:999px;overflow:hidden}
-  .bar{height:100%;width:0;background:var(--ok);transition:width .2s}
-  .grid{display:grid;gap:10px}
-  @media(min-width:960px){.grid.cols-2{grid-template-columns:1fr 1fr}}
-  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
-  .pill{display:inline-block;border:1px solid var(--bd);padding:2px 8px;border-radius:999px;background:#f9fafb}
-  .hint{font-size:12px;color:#6b7280;margin-top:4px}
-  .danger-text{color:#b91c1c}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reel Poster</title>
+  <style>
+    :root{--bg:#0f1115;--panel:#151923;--muted:#8b92a2;--text:#e9eef5;--line:#273042;--accent:#4c8dff;--danger:#ff5d5d}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial}
+    .wrap{max-width:1200px;margin:18px auto;padding:0 14px}
+    .toolbar{position:sticky;top:0;background:linear-gradient(#151a25,#131824);border:1px solid var(--line);border-radius:10px;padding:10px;z-index:50}
+    .toolbar .grid{display:grid;grid-template-columns:repeat(6,1fr) 160px 160px;gap:8px;align-items:center}
+    .toolbar label{font-size:12px;color:#cdd5e2}
+    .toolbar input[type=text]{width:100%;background:#101525;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px}
+    .toolbar .btn{background:#101525;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;cursor:pointer}
+    .toolbar .btn.primary{background:var(--accent);border-color:#3a78ff;color:#fff;font-weight:600}
+    .toolbar .btn.danger{background:#271519;border-color:#4a1e27;color:#ffb3b3}
+    .toolbar .row{display:flex;gap:8px;align-items:center}
+    .toolbar select{width:100%;background:#101525;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px}
+
+    .tabs{display:flex;gap:6px;margin:12px 0}
+    .tab{padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#121726;color:var(--muted);cursor:pointer}
+    .tab.active{background:var(--panel);color:var(--text)}
+    .panel{display:none;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px}
+    .panel.active{display:block}
+
+    /* 投稿レイアウト（元UIに合わせて左サムネ/中央ファイル名/右テキスト） */
+    .materials{border:1px solid var(--line);border-radius:10px;background:#121726}
+    .mat-head,.mat-row{display:grid;grid-template-columns:160px 1fr 1.5fr;gap:10px;align-items:center}
+    .mat-head{position:sticky;top:64px;background:#111626;border-bottom:1px solid var(--line);padding:8px 10px;font-size:12px;color:#cfd7e6;z-index:5}
+    .mat-body{max-height:520px;overflow:auto;padding:10px}
+    .thumb{width:140px;aspect-ratio:1/1;background:#0f1422;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center}
+    .thumb img,.thumb video{max-width:100%;max-height:100%}
+    .mat-row{border-bottom:1px dashed #223048;padding:10px 0}
+    textarea{width:100%;min-height:70px;background:#0f1422;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px;resize:vertical}
+
+    .filedrop{position:relative;border:1px dashed #3a465e;border-radius:10px;background:#0f1422;padding:12px;text-align:center;margin:10px 0}
+    .filedrop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+    .muted{color:var(--muted);font-size:12px}
+    .bar{display:flex;gap:8px;align-items:center;margin:10px 0}
+    .log{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#0f1422;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto}
+  </style>
 </head>
 <body>
+<div class="wrap">
 
-<!-- タブ -->
-<div class="tabs">
-  <button class="tab active" data-target="#tab-post">投稿</button>
-  <button class="tab" data-target="#tab-random">ランダムテキスト</button>
-  <button class="tab" data-target="#tab-accounts">アカウント管理</button>
-  <button class="tab" data-target="#tab-tokens">トークン管理</button>
-  <button class="tab" data-target="#tab-logs">投稿ログ</button>
+  <!-- ① アカウント＆トークン操作：常時トップ固定（元UIのまま） -->
+  <div class="toolbar">
+    <div class="grid">
+      <div>
+        <label>番号</label>
+        <input id="acctNo" type="text" placeholder="例: 1">
+      </div>
+      <div>
+        <label>ラベル</label>
+        <input id="acctLabel" type="text" placeholder="任意の表示名">
+      </div>
+      <div>
+        <label>IGユーザーID</label>
+        <input id="acctIG" type="text" placeholder="1784...">
+      </div>
+      <div>
+        <label>ページID</label>
+        <input id="acctPage" type="text" placeholder="5750...">
+      </div>
+      <div>
+        <label>選択</label>
+        <select id="accountSelect"></select>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnAcctAdd">+追加/更新</button>
+        <button class="btn" id="btnTokenNew">トークン</button>
+        <button class="btn" id="btnTokenCheck">トークン有効期限チェック</button>
+        <button class="btn danger" id="btnAcctDel">削除</button>
+      </div>
+      <div class="row">
+        <label class="muted"><input type="checkbox" id="allAccounts"> 全アカウント（分散投稿）</label>
+        <button class="btn" id="btnToolbarReload">更新</button>
+        <button class="btn primary" id="btnPost">投稿実行</button>
+      </div>
+    </div>
+    <div class="muted" id="toolbarNote"></div>
+  </div>
+
+  <!-- タブ（投稿/ランダムテキスト/投稿ログ）。※ツールバーは常に上に残る -->
+  <div class="tabs">
+    <div class="tab active" data-tab="post">投稿</div>
+    <div class="tab" data-tab="random">ランダムテキスト</div>
+    <div class="tab" data-tab="logs">投稿ログ</div>
+  </div>
+
+  <!-- ② 投稿 -->
+  <section id="post" class="panel active">
+    <div class="filedrop">
+      <div>＋素材追加…（外部選択や移動）</div>
+      <div class="muted">画像/動画 複数可。DnDで並び替えはブラウザ依存なので、順番は投稿時にサーバ側でソート（ファイル名昇順）に揃えます。</div>
+      <input id="fileInput" type="file" accept="image/*,video/*" multiple>
+    </div>
+
+    <div class="materials">
+      <div class="mat-head">
+        <div>サムネ</div>
+        <div>ファイル名</div>
+        <div>テキスト（空ならランダム）</div>
+      </div>
+      <div class="mat-body" id="matBody"></div>
+    </div>
+
+    <div class="bar">
+      <button class="btn" id="btnRemoveSelected">素材削除</button>
+      <span class="muted">チェックされた行を削除。選択が無ければ何もしません。</span>
+    </div>
+
+    <div>
+      <h4 style="margin:10px 0 6px">進捗</h4>
+      <div class="log" id="logBox">待機中</div>
+    </div>
+  </section>
+
+  <!-- ③ ランダムテキスト -->
+  <section id="random" class="panel">
+    <div class="bar">
+      <button class="btn" id="btnRandAdd">行を追加</button>
+      <span class="muted" id="randMsg"></span>
+    </div>
+    <div id="randList"></div>
+  </section>
+
+  <!-- ④ 投稿ログ -->
+  <section id="logs" class="panel">
+    <div class="bar">
+      <button class="btn" id="btnReloadLogs">更新</button>
+    </div>
+    <div class="log" id="logsBox">（ログなし）</div>
+  </section>
 </div>
 
-<!-- 投稿タブ -->
-<section id="tab-post" class="section active">
-  <div class="row">
-    <strong>アカウント選択</strong>
-    <select id="account" class="sel" style="min-width:300px" disabled><option>読み込み中…</option></select>
-    <button id="refresh" class="btn">更新</button>
-    <button id="post" class="btn primary">投稿実行</button>
-  </div>
-
-  <div class="card" style="margin-bottom:10px">
-    <div class="muted">overlay_input の素材一覧（チェックが「選択投稿」／未選択＝全部投稿）</div>
-    <table id="tbl">
-      <thead>
-        <tr>
-          <th style="width:170px">サムネ</th>
-          <th>ファイル名</th>
-          <th style="width:40%">テキスト（空なら random_texts.txt）</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <div class="row">
-      <div class="muted" id="status">待機中</div>
-    </div>
-    <div class="progress" style="margin-top:8px"><div class="bar" id="bar"></div></div>
-    <div id="results" style="margin-top:10px;font-size:14px"></div>
-  </div>
-</section>
-
-<!-- ランダムテキスト -->
-<section id="tab-random" class="section">
-  <div class="grid cols-2">
-    <div class="card">
-      <div style="font-weight:600;margin-bottom:6px">random_texts.txt（1行=1候補）</div>
-      <textarea id="randomTexts" placeholder="例：\nフォローしてね\n続きはストーリーで\n…"></textarea>
-      <div class="row" style="margin-top:8px">
-        <button id="saveRandom" class="btn primary">保存</button>
-        <span id="randomSaveMsg" class="muted"></span>
-      </div>
-      <div class="hint">保存すると即座にサーバーへ反映され、次回の「空欄」キャプションに使われます。</div>
-    </div>
-    <div class="card">
-      <div style="font-weight:600;margin-bottom:6px">現在の行数</div>
-      <div id="randomCount" class="pill">-- 行</div>
-    </div>
-  </div>
-</section>
-
-<!-- アカウント管理 -->
-<section id="tab-accounts" class="section">
-  <div class="grid cols-2">
-    <div class="card">
-      <div style="font-weight:600;margin-bottom:6px">アカウント一覧</div>
-      <table id="acctTable">
-        <thead><tr><th>#</th><th>ラベル</th><th>背景（例: background1.mp4）</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div class="card">
-      <div style="font-weight:600;margin-bottom:6px">アカウント追加</div>
-      <div class="grid">
-        <input id="acctNo" class="txt" type="number" placeholder="アカウント番号（例: 1）">
-        <input id="acctLabel" class="txt" placeholder="ラベル（任意）">
-        <input id="acctBg" class="txt" placeholder="背景ファイル名（例: background1.mp4）">
-        <button id="acctAddBtn" class="btn primary">追加</button>
-        <div class="hint">保存先は settings_store（accounts.json）。</div>
-        <div id="acctMsg" class="muted"></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- トークン管理 -->
-<section id="tab-tokens" class="section">
-  <div class="grid cols-2">
-    <div class="card">
-      <div style="font-weight:600;margin-bottom:6px">トークン一覧</div>
-      <table id="tokTable">
-        <thead><tr><th>#</th><th>page_id</th><th>ig_user_id</th><th>token(先頭のみ)</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div class="card">
-      <div style="font-weight:600;margin-bottom:6px">トークン追加</div>
-      <div class="grid">
-        <input id="tokAcctNo" class="txt" type="number" placeholder="アカウント番号（例: 1）">
-        <input id="tokPage" class="txt" placeholder="page_id">
-        <input id="tokIg" class="txt" placeholder="ig_user_id">
-        <textarea id="tokAccess" class="txt" placeholder="長期アクセストークン"></textarea>
-        <button id="tokAddBtn" class="btn primary">追加</button>
-        <div class="hint">保存先は settings_store（tokens.json など）。</div>
-        <div id="tokMsg" class="muted"></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- 投稿ログ（サーバ側で保存していれば表示）-->
-<section id="tab-logs" class="section">
-  <div class="card">
-    <div class="row">
-      <button id="logReload" class="btn">再読込</button>
-      <span class="muted">最近の投稿ログ</span>
-    </div>
-    <pre id="logs" class="card mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;margin-top:8px"></pre>
-  </div>
-</section>
-
 <script>
-const $ = s => document.querySelector(s);
-const $$ = s => Array.from(document.querySelectorAll(s));
-
-/* タブ切替 */
-$$('.tab').forEach(t=>{
-  t.addEventListener('click', ()=>{
-    $$('.tab').forEach(x=>x.classList.remove('active'));
-    $$('.section').forEach(x=>x.classList.remove('active'));
-    t.classList.add('active');
-    const trg = t.dataset.target;
-    if (trg) document.querySelector(trg).classList.add('active');
+  // タブ
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById(t.dataset.tab).classList.add('active');
+    });
   });
-});
 
-const elAcc   = $('#account');
-const elTbl   = $('#tbl tbody');
-const elPost  = $('#post');
-const elRef   = $('#refresh');
-const elStat  = $('#status');
-const elBar   = $('#bar');
-const elRes   = $('#results');
+  // 状態
+  const S = { items: [], comments: {}, selectedRows: new Set(), randomTexts: [] };
+  const matBody = document.getElementById('matBody');
+  const logBox  = document.getElementById('logBox');
 
-let accounts = [];
-let materials = [];
-let overrides = {};
-let selected = new Set();
-
-/* 起動 */
-init();
-async function init(){
-  await Promise.all([loadAccounts(), loadMaterials(), loadRandomTexts(), loadTokens()]);
-  renderMaterials();
-  renderAccounts();
-  renderTokens();
-}
-
-/* 投稿タブ：読み込み */
-async function loadAccounts(){
-  try{
-    const r = await fetch('/api/accounts');
-    const data = await r.json();
-    accounts = Array.isArray(data)? data: [];
-    elAcc.innerHTML = '';
-    if (accounts.length===0){ elAcc.innerHTML = '<option value="">accounts.jsonが読めません</option>'; elAcc.disabled = true; }
-    else{
-      for(const a of accounts){
-        const opt = document.createElement('option');
-        opt.value = a.account_no;
-        opt.textContent = a.label || `${a.account_no}`;
-        elAcc.appendChild(opt);
-      }
-      elAcc.disabled = false;
+  // アカウント読み込み（accounts.json → /api/accounts のどちらでもOK）
+  async function loadAccounts() {
+    let js = {accounts:[]};
+    try {
+      const r = await fetch('/api/accounts'); if(r.ok) js = await r.json();
+      else throw 0;
+    } catch {
+      try {
+        const r2 = await fetch('/static/accounts.json'); if(r2.ok) js = await r2.json();
+      } catch {}
     }
-  }catch(e){
-    elAcc.innerHTML = '<option value="">/api/accounts エラー</option>';
-    elAcc.disabled = true;
-  }
-}
-async function loadMaterials(){
-  try{
-    const r = await fetch('/api/materials');
-    const data = await r.json();
-    materials = Array.isArray(data)? data: [];
-  }catch(e){ materials = []; }
-}
-function renderMaterials(){
-  elTbl.innerHTML = '';
-  for(const m of materials){
-    const tr = document.createElement('tr');
-
-    const td0 = document.createElement('td');
-    td0.innerHTML = `
-      <label style="display:flex;gap:8px;align-items:center">
-        <input type="checkbox" data-name="${m.name}">
-        <img class="thumb" src="/overlay_input/${m.name}" alt="">
-      </label>`;
-    tr.appendChild(td0);
-
-    const td1 = document.createElement('td');
-    td1.innerHTML = `<div style="display:flex;align-items:center;height:140px">${m.name}</div>`;
-    tr.appendChild(td1);
-
-    const td2 = document.createElement('td');
-    td2.innerHTML = `<textarea placeholder="空欄＝random_texts.txtから自動" data-name="${m.name}"></textarea>`;
-    tr.appendChild(td2);
-
-    elTbl.appendChild(tr);
-  }
-  elTbl.querySelectorAll('input[type=checkbox]').forEach(chk=>{
-    chk.addEventListener('change', e=>{
-      const n = e.target.dataset.name;
-      if(e.target.checked){ selected.add(n); chk.closest('tr').classList.add('sel'); }
-      else { selected.delete(n); chk.closest('tr').classList.remove('sel'); }
+    const sel = document.getElementById('accountSelect');
+    sel.innerHTML = '';
+    (js.accounts||[]).forEach(a=>{
+      const o = document.createElement('option');
+      o.value = a.account_no; o.textContent = `${a.account_no}. ${a.name||''} (IG:${a.ig_user_id||''} / Page:${a.page_id||''})`;
+      sel.appendChild(o);
     });
-  });
-  elTbl.querySelectorAll('textarea').forEach(t=>{
-    t.addEventListener('input', e=>{
-      overrides[e.target.dataset.name] = e.target.value;
-    });
-  });
-}
-elRef.addEventListener('click', async ()=>{
-  elStat.textContent = '再読込中…';
-  await loadMaterials(); renderMaterials();
-  elStat.textContent = '待機中';
-});
-elPost.addEventListener('click', async ()=>{
-  const accountNo = parseInt(elAcc.value || '1', 10);
-  const filenames = Array.from(selected); // 未選択→サーバ側で全部投稿
-  elPost.disabled = true; elRef.disabled = true;
-  elStat.textContent = '投稿中…'; elBar.style.width = '15%'; elRes.textContent = '';
-  try{
-    const res = await fetch('/api/post', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ account_no: accountNo, filenames, overrides })
-    });
-    const json = await res.json();
-    if(!res.ok || !json.ok) throw new Error(json.error || '投稿API失敗');
-    const rows = json.results || [];
-    let ok = 0;
-    rows.forEach((r,i)=>{
-      const d = document.createElement('div');
-      if(r.ok){ ok++; d.textContent = `✅ ${r.name} → media_id: ${r.media_id}`; }
-      else { d.textContent = `❌ ${r.name} → ${r.error||'失敗'}`; d.classList.add('danger-text'); }
-      elRes.appendChild(d);
-      elBar.style.width = `${Math.min(15 + ((i+1)/Math.max(rows.length,1))*85, 100)}%`;
-    });
-    elStat.textContent = `完了：成功 ${ok} / ${rows.length}`;
-  }catch(err){
-    elStat.textContent = `失敗: ${err.message}`;
-    elBar.style.width = '0%';
-  }finally{
-    elPost.disabled = false; elRef.disabled = false;
+    document.getElementById('toolbarNote').textContent = js.accounts?.length ? '' : 'accounts.json が読み込めません。/api/accounts も空です。';
   }
-});
 
-/* ランダムテキスト */
-async function loadRandomTexts(){
-  try{
-    const r = await fetch('/api/random_texts');
-    const j = await r.json();
-    $('#randomTexts').value = (j && j.text)||'';
-    $('#randomCount').textContent = ((j && j.count)||0) + ' 行';
-  }catch(e){
-    $('#randomTexts').value = '';
-    $('#randomCount').textContent = '0 行';
-  }
-}
-$('#saveRandom').addEventListener('click', async ()=>{
-  const txt = $('#randomTexts').value||'';
-  const r = await fetch('/api/random_texts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
-  const j = await r.json().catch(()=>({ok:false}));
-  if(j.ok){ $('#randomSaveMsg').textContent = '保存しました'; $('#randomCount').textContent = (j.count||0)+' 行'; }
-  else { $('#randomSaveMsg').textContent = '保存失敗'; }
-  setTimeout(()=>$('#randomSaveMsg').textContent='',1500);
-});
+  // アカウント操作（エンドポイント名は従来どおり想定）
+  document.getElementById('btnToolbarReload').onclick = loadAccounts;
+  document.getElementById('btnAcctAdd').onclick = async ()=>{
+    const payload = {
+      account_no: (document.getElementById('acctNo').value||'').trim(),
+      name: (document.getElementById('acctLabel').value||'').trim(),
+      ig_user_id: (document.getElementById('acctIG').value||'').trim(),
+      page_id: (document.getElementById('acctPage').value||'').trim()
+    };
+    await fetch('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{});
+    loadAccounts();
+  };
+  document.getElementById('btnAcctDel').onclick = async ()=>{
+    const no = (document.getElementById('acctNo').value||'').trim();
+    if(!no) return;
+    await fetch('/api/accounts/'+encodeURIComponent(no),{method:'DELETE'}).catch(()=>{});
+    loadAccounts();
+  };
+  document.getElementById('btnTokenNew').onclick = ()=> window.open('/tokens', '_blank');
+  document.getElementById('btnTokenCheck').onclick = ()=> window.open('/tokens/status', '_blank');
 
-/* アカウント管理 */
-function renderAccounts(){
-  const tb = $('#acctTable tbody'); tb.innerHTML = '';
-  for(const a of accounts){
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${a.account_no}</td>
-      <td>${a.label||''}</td>
-      <td>${a.background||''}</td>
-      <td><button class="btn danger" data-del-acct="${a.account_no}">削除</button></td>`;
-    tb.appendChild(tr);
-  }
-  tb.querySelectorAll('[data-del-acct]').forEach(b=>{
-    b.addEventListener('click', async ()=>{
-      const no = parseInt(b.dataset.delAcct,10);
-      if(!confirm(`アカウント #${no} を削除しますか？`)) return;
-      const r = await fetch('/api/accounts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no:no})});
-      const j = await r.json().catch(()=>({ok:false}));
-      if(j.ok){ await loadAccounts(); renderAccounts(); }
-      else alert('削除に失敗しました');
+  // 素材の追加
+  function addFiles(files){
+    Array.from(files).forEach(f=>{
+      const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      const url = URL.createObjectURL(f);
+      const type = f.type.startsWith('video') ? 'video' : 'image';
+      S.items.push({id, file:f, url, type, name:f.name});
+      S.comments[id] = S.comments[id] || '';
     });
-  });
-}
-$('#acctAddBtn').addEventListener('click', async ()=>{
-  const no = parseInt($('#acctNo').value||'0',10);
-  const label = $('#acctLabel').value||'';
-  const bg = $('#acctBg').value||'';
-  if(!no){ $('#acctMsg').textContent='番号は必須です'; return; }
-  const r = await fetch('/api/accounts/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no:no,label,background:bg})});
-  const j = await r.json().catch(()=>({ok:false}));
-  if(j.ok){ $('#acctMsg').textContent='追加しました'; $('#acctNo').value=''; $('#acctLabel').value=''; $('#acctBg').value=''; await loadAccounts(); renderAccounts(); }
-  else $('#acctMsg').textContent='追加失敗';
-  setTimeout(()=>$('#acctMsg').textContent='',1500);
-});
-
-/* トークン管理 */
-let tokens = [];
-async function loadTokens(){
-  try{
-    const r = await fetch('/api/tokens');
-    const j = await r.json();
-    tokens = Array.isArray(j)? j: (j.tokens||[]);
-  }catch(e){ tokens = []; }
-}
-function renderTokens(){
-  const tb = $('#tokTable tbody'); tb.innerHTML = '';
-  for(const t of tokens){
-    const head = (t.access_token||'').slice(0,8);
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${t.account_no??''}</td>
-      <td>${t.page_id??''}</td>
-      <td>${t.ig_user_id??''}</td>
-      <td><span class="pill mono">${head}…</span></td>
-      <td><button class="btn danger" data-del-tok="${t.account_no}">削除</button></td>`;
-    tb.appendChild(tr);
+    renderRows();
   }
-  tb.querySelectorAll('[data-del-tok]').forEach(b=>{
-    b.addEventListener('click', async ()=>{
-      const no = parseInt(b.dataset.delTok,10);
-      if(!confirm(`アカウント #${no} のトークンを削除しますか？`)) return;
-      const r = await fetch('/api/tokens/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no:no})});
-      const j = await r.json().catch(()=>({ok:false}));
-      if(j.ok){ await loadTokens(); renderTokens(); } else alert('削除に失敗しました');
-    });
-  });
-}
-$('#tokAddBtn').addEventListener('click', async ()=>{
-  const account_no = parseInt($('#tokAcctNo').value||'0',10);
-  const page_id = $('#tokPage').value||'';
-  const ig_user_id = $('#tokIg').value||'';
-  const access_token = $('#tokAccess').value||'';
-  if(!account_no || !page_id || !ig_user_id || !access_token){ $('#tokMsg').textContent='全て必須です'; return; }
-  const r = await fetch('/api/tokens/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no,page_id,ig_user_id,access_token})});
-  const j = await r.json().catch(()=>({ok:false}));
-  if(j.ok){ $('#tokMsg').textContent='追加しました'; $('#tokAcctNo').value=''; $('#tokPage').value=''; $('#tokIg').value=''; $('#tokAccess').value=''; await loadTokens(); renderTokens(); }
-  else $('#tokMsg').textContent='追加失敗';
-  setTimeout(()=>$('#tokMsg').textContent='',1500);
-});
+  document.getElementById('fileInput').addEventListener('change',e=>addFiles(e.target.files));
 
-/* 投稿ログ（任意実装：/api/logs があれば） */
-$('#logReload').addEventListener('click', async ()=>{
-  try{
-    const r = await fetch('/api/logs');
-    const t = await r.text();
-    $('#logs').textContent = t || '(ログなし)';
-  }catch(e){ $('#logs').textContent = '(取得エラー)'; }
-});
+  // 行描画（左サムネ／中央ファイル名／右テキスト）
+  function renderRows(){
+    matBody.innerHTML = '';
+    S.items.forEach(item=>{
+      const row = document.createElement('div'); row.className='mat-row';
+      const left = document.createElement('div');
+      const thumb = document.createElement('label'); thumb.className='thumb'; thumb.title='クリックで選択';
+      const chk = document.createElement('input'); chk.type='checkbox'; chk.style.marginRight='6px';
+      chk.checked = S.selectedRows.has(item.id);
+      chk.addEventListener('change',()=>{ if(chk.checked) S.selectedRows.add(item.id); else S.selectedRows.delete(item.id); });
+      const box = document.createElement(item.type==='image'?'img':'video'); box.src=item.url; if(item.type==='video'){box.muted=true;box.playsInline=true;}
+      left.appendChild(chk); thumb.appendChild(box); left.appendChild(thumb);
+
+      const mid = document.createElement('div'); mid.textContent = item.name; mid.style.fontSize='12px'; mid.style.color='#cfd7e6';
+
+      const right = document.createElement('div');
+      const ta = document.createElement('textarea'); ta.placeholder='空ならランダムテキスト';
+      ta.value = S.comments[item.id] || '';
+      ta.addEventListener('input',()=>{ S.comments[item.id] = ta.value; });
+      right.appendChild(ta);
+
+      row.appendChild(left); row.appendChild(mid); row.appendChild(right);
+      matBody.appendChild(row);
+    });
+  }
+
+  // 素材削除
+  document.getElementById('btnRemoveSelected').onclick = ()=>{
+    if(S.selectedRows.size===0) return;
+    S.items = S.items.filter(x=>!S.selectedRows.has(x.id));
+    S.selectedRows.clear();
+    renderRows();
+  };
+
+  // ランダムテキスト
+  async function loadRandom(){ try{
+    const r = await fetch('/api/random_texts'); const js = await r.json();
+    S.randomTexts = js.items||[];
+  }catch{ S.randomTexts = []; }
+    renderRandom();
+  }
+  function renderRandom(){
+    const box = document.getElementById('randList'); box.innerHTML='';
+    S.randomTexts.forEach((t,i)=>{
+      const row = document.createElement('div'); row.style.display='flex'; row.style.gap='8px'; row.style.margin='6px 0';
+      const inp = document.createElement('input'); inp.type='text'; inp.value=t; inp.style.flex='1';
+      const del = document.createElement('button'); del.className='btn'; del.textContent='削除';
+      inp.addEventListener('input', debounce(async ()=>{
+        S.randomTexts[i]=inp.value; await saveRandom();
+      },350));
+      del.onclick = async ()=>{ S.randomTexts.splice(i,1); await saveRandom(); renderRandom(); };
+      row.appendChild(inp); row.appendChild(del); box.appendChild(row);
+    });
+  }
+  async function saveRandom(){
+    const m = document.getElementById('randMsg'); m.textContent='保存中…';
+    await fetch('/api/random_texts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:S.randomTexts})}).catch(()=>{});
+    m.textContent='保存しました'; setTimeout(()=>m.textContent='',1200);
+  }
+  document.getElementById('btnRandAdd').onclick = async ()=>{ S.randomTexts.push(''); await saveRandom(); renderRandom(); };
+
+  // 投稿実行（選択があれば選択のみ、無ければ全部）
+  document.getElementById('btnPost').onclick = async ()=>{
+    const accountNo = document.getElementById('accountSelect').value;
+    const allAccounts = document.getElementById('allAccounts').checked;
+    if(!accountNo && !allAccounts){ alert('アカウントを選択してください'); return; }
+
+    let targets = S.items;
+    if(S.selectedRows.size>0) targets = S.items.filter(x=>S.selectedRows.has(x.id));
+    if(targets.length===0){ alert('素材がありません'); return; }
+
+    // 1) サーバへアップロード
+    const uploaded = [];
+    for(const it of targets){
+      const fd = new FormData(); fd.append('file', it.file);
+      const r = await fetch('/api/upload',{method:'POST',body:fd});
+      const js = await r.json().catch(()=>({}));
+      if(!r.ok || !js.path){ appendLog(`アップロード失敗: ${it.name}`); continue; }
+      uploaded.push({ server_path: js.path, comment: (S.comments[it.id]||'').trim() });
+    }
+    if(uploaded.length===0){ appendLog('投稿対象がありません'); return; }
+
+    // 2) バッチ投稿
+    const payload = { account_no: accountNo?parseInt(accountNo,10):null, all_accounts: !!allAccounts, items: uploaded };
+    const r2 = await fetch('/api/post_batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const js2 = await r2.json().catch(()=>({error:'JSONパース失敗'}));
+    if(!r2.ok){ appendLog('投稿失敗: '+(js2.error||r2.statusText)); return; }
+    appendLog(js2.message || '投稿を受け付けました');
+  };
+
+  // ログ
+  function appendLog(t){ if(logBox.textContent==='待機中') logBox.textContent=''; logBox.textContent += (logBox.textContent?'\n':'')+t; logBox.scrollTop=logBox.scrollHeight; }
+  document.getElementById('btnReloadLogs').onclick = async ()=>{
+    const r = await fetch('/api/logs'); const js = await r.json().catch(()=>({lines:[]}));
+    document.getElementById('logsBox').textContent = (js.lines||[]).join('\n') || '（ログなし）';
+  };
+
+  // ユーティリティ
+  function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
+
+  // 初期化
+  (async function init(){
+    await loadAccounts();
+    await loadRandom();
+    document.getElementById('btnReloadLogs').click();
+  })();
 </script>
 </body>
 </html>
