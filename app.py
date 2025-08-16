@@ -1,4 +1,4 @@
-# app.py — Flask Web UI (Py3.9 safe) / GUI準拠版
+# app.py — Flask Web UI (Py3.9 safe) / GUI準拠 + 投稿ログ対応
 from __future__ import annotations
 
 import os
@@ -13,36 +13,137 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-# 依存（requirements.txtに moviepy, Pillow 等が入っていること）
+# 依存（requirements.txt に moviepy, Pillow, requests, cloudinary 等）
 from moviepy.editor import VideoFileClip
 from PIL import Image
 
-# 自前モジュール（プロジェクト直下）
-from settings_store import (
-    load_accounts, save_accounts,
-    load_overrides, save_overrides,
-    load_materials_order, save_materials_order,
-    load_random_texts, save_random_texts,
-)
+# ========= 可能なら settings_store を使う（無ければローカルファイルでfallback） =========
+def _try_import_settings_store():
+    try:
+        import settings_store as s  # type: ignore
+        return s
+    except Exception:
+        return None
+
+SSTORE = _try_import_settings_store()
+
+# ========= 自前モジュール（既に直下に追加済みのはず） =========
+# PosterCoreReel は動画合成→Cloudinary→Graph API投稿の中核
 from poster_core_reel import PosterCoreReel
 
-# ============ 基本パス ============
+# ========= パス類 =========
 BASE_DIR: Path = Path(__file__).resolve().parent
 STATIC_DIR: Path = BASE_DIR / "static"
 TEMPLATES_DIR: Path = BASE_DIR / "templates"
+LOG_DIR: Path = BASE_DIR / "logs"
 
 OVERLAY_DIR: Path = STATIC_DIR / "overlay_input"
 THUMBS_DIR: Path = STATIC_DIR / "thumbs"
 BACKGROUND_DIR: Path = STATIC_DIR / "backgrounds"
 OUTPUT_DIR: Path = STATIC_DIR / "output"
 
-for d in (OVERLAY_DIR, THUMBS_DIR, BACKGROUND_DIR, OUTPUT_DIR, TEMPLATES_DIR):
+for d in (STATIC_DIR, TEMPLATES_DIR, LOG_DIR, OVERLAY_DIR, THUMBS_DIR, BACKGROUND_DIR, OUTPUT_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-# ============ Flask ============
+# ========= Flask =========
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(TEMPLATES_DIR))
 
-# アップロード許可拡張子
+# ========= ストレージ（settings_store が無ければローカルファイル） =========
+ACCOUNTS_JSON = BASE_DIR / "accounts.json"
+OVERRIDES_JSON = BASE_DIR / "material_overrides.json"
+ORDER_JSON = BASE_DIR / "materials_order.json"
+RANDOM_TXT = BASE_DIR / "random_texts.txt"
+
+def load_accounts_any() -> List[Dict[str, Any]]:
+    # settings_store があれば優先
+    if SSTORE:
+        try:
+            data = SSTORE.load_accounts()
+            if isinstance(data, dict):
+                accs = data.get("accounts", [])
+                if isinstance(accs, list) and accs:
+                    return accs
+        except Exception:
+            pass
+    # 直読み
+    if ACCOUNTS_JSON.exists():
+        try:
+            d = json.loads(ACCOUNTS_JSON.read_text(encoding="utf-8"))
+            if isinstance(d, dict):
+                accs = d.get("accounts", [])
+                if isinstance(accs, list):
+                    return accs
+        except Exception:
+            pass
+    return []
+
+def load_overrides() -> Dict[str, str]:
+    if SSTORE:
+        try:
+            return SSTORE.load_overrides()
+        except Exception:
+            pass
+    if OVERRIDES_JSON.exists():
+        try:
+            return json.loads(OVERRIDES_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+def save_overrides(data: Dict[str, str]) -> None:
+    if SSTORE:
+        try:
+            SSTORE.save_overrides(data)
+            return
+        except Exception:
+            pass
+    OVERRIDES_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def load_materials_order() -> List[str]:
+    if SSTORE:
+        try:
+            return SSTORE.load_materials_order()
+        except Exception:
+            pass
+    if ORDER_JSON.exists():
+        try:
+            return json.loads(ORDER_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+    return []
+
+def save_materials_order(order: List[str]) -> None:
+    if SSTORE:
+        try:
+            SSTORE.save_materials_order(order)
+            return
+        except Exception:
+            pass
+    ORDER_JSON.write_text(json.dumps(order, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def load_random_texts() -> str:
+    if SSTORE:
+        try:
+            return SSTORE.load_random_texts()
+        except Exception:
+            pass
+    if RANDOM_TXT.exists():
+        try:
+            return RANDOM_TXT.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+    return ""
+
+def save_random_texts(body: str) -> None:
+    if SSTORE:
+        try:
+            SSTORE.save_random_texts(body)
+            return
+        except Exception:
+            pass
+    RANDOM_TXT.write_text(body, encoding="utf-8")
+
+# ========= ユーティリティ =========
 ALLOWED_EXTS = {
     "jpg", "jpeg", "png", "bmp", "gif", "webp",
     "mp4", "mov", "m4v", "avi", "mkv", "webm"
@@ -52,40 +153,31 @@ def _is_allowed(filename: str) -> bool:
     ext = filename.rsplit(".", 1)[-1].lower()
     return ext in ALLOWED_EXTS
 
-# ============ サムネ生成 ============
 def _thumb_path_for(filename: str) -> Path:
     return THUMBS_DIR / f"{filename}.jpg"
 
 def _ensure_thumb(material_path: Path) -> str:
-    """
-    素材ファイルのサムネイルを用意して、/static/thumbs/... のURLを返す
-    """
     thumb_path = _thumb_path_for(material_path.name)
     if thumb_path.exists():
         return f"/static/thumbs/{thumb_path.name}"
-
     ext = material_path.suffix.lower().lstrip(".")
     try:
         if ext in {"mp4", "mov", "m4v", "avi", "mkv", "webm"}:
             clip = VideoFileClip(str(material_path))
-            frame_path = str(thumb_path)
-            # 1秒目でフレーム保存（短い場合は0秒）
             t = 1.0
             try:
                 if clip.duration and clip.duration < 1.0:
                     t = 0.0
             except Exception:
                 t = 0.0
-            clip.save_frame(frame_path, t=t)
+            clip.save_frame(str(thumb_path), t=t)
             clip.close()
         else:
-            # 画像 → そのまま縮小して保存
             with Image.open(str(material_path)) as im:
                 im = im.convert("RGB")
                 im.thumbnail((480, 480))
                 im.save(str(thumb_path), "JPEG", quality=85)
     except Exception:
-        # サムネ作成失敗時のフォールバック（透明1px）
         try:
             with Image.new("RGB", (1, 1), (255, 255, 255)) as im:
                 im.save(str(thumb_path), "JPEG", quality=80)
@@ -93,22 +185,17 @@ def _ensure_thumb(material_path: Path) -> str:
             pass
     return f"/static/thumbs/{thumb_path.name}"
 
-# ============ 素材列挙 ============
-def _list_materials() -> List[Dict[str, Any]]:
-    overrides: Dict[str, str] = load_overrides()  # filename -> text
-    order: List[str] = load_materials_order()     # 並び順（任意）
+def list_materials() -> List[Dict[str, Any]]:
+    overrides = load_overrides()
+    order = load_materials_order()
 
-    files = []
+    files: List[str] = []
     for p in sorted(OVERLAY_DIR.iterdir()):
-        if not p.is_file():
-            continue
-        if not _is_allowed(p.name):
-            continue
-        files.append(p.name)
+        if p.is_file() and _is_allowed(p.name):
+            files.append(p.name)
 
-    # 並び順があれば反映（ない素材は末尾）
     if order:
-        order_index = {name: i for i, name in enumerate(order)}
+        order_index = {n: i for i, n in enumerate(order)}
         files.sort(key=lambda n: order_index.get(n, 10_000_000))
 
     items: List[Dict[str, Any]] = []
@@ -121,15 +208,7 @@ def _list_materials() -> List[Dict[str, Any]]:
         })
     return items
 
-# ============ 背景選択（アカウント番号に対応） ============
-def _pick_background_for_account(account_no: int) -> Optional[Path]:
-    """
-    優先順位:
-      1) backgrounds/{no}.mp4
-      2) backgrounds/background{no}.mp4
-      3) backgrounds/{no}.mov
-      4) backgrounds の先頭の動画
-    """
+def pick_background_for_account(account_no: int) -> Optional[Path]:
     candidates = [
         BACKGROUND_DIR / f"{account_no}.mp4",
         BACKGROUND_DIR / f"background{account_no}.mp4",
@@ -139,22 +218,20 @@ def _pick_background_for_account(account_no: int) -> Optional[Path]:
     for c in candidates:
         if c.exists():
             return c
-
-    # フォールバック：最初に見つかった動画
     for p in BACKGROUND_DIR.iterdir():
         if p.suffix.lower() in {".mp4", ".mov", ".m4v"}:
             return p
     return None
 
-# ============ ルーティング ============
+# ========= ルーティング =========
 @app.get("/health")
-def health() -> Response:
+def health():
     return jsonify(ok=True)
 
 @app.get("/")
 def index():
-    accounts = load_accounts().get("accounts", [])
-    materials = _list_materials()
+    accounts = load_accounts_any()
+    materials = list_materials()
     random_texts_body = load_random_texts()
     return render_template(
         "index.html",
@@ -163,34 +240,29 @@ def index():
         random_texts=random_texts_body
     )
 
-# ---- 素材アップロード ----
+# 素材アップロード
 @app.post("/upload")
 def upload():
     f = request.files.get("file")
     if not f or not f.filename:
         return redirect(url_for("index"))
-
     fname = secure_filename(f.filename)
     if not _is_allowed(fname):
         return redirect(url_for("index"))
-
     save_path = OVERLAY_DIR / fname
     f.save(str(save_path))
-    # サムネを準備
     _ensure_thumb(save_path)
     return redirect(url_for("index"))
 
-# ---- コメント保存（素材1:1）----
+# コメント保存（素材1:1）
 @app.post("/api/override")
 def api_override():
     try:
         payload = request.get_json(force=True)
         filename = str(payload.get("filename", "")).strip()
         text = str(payload.get("text", ""))
-
         if not filename:
             return jsonify(ok=False, error="filename is required"), 400
-
         overrides = load_overrides()
         overrides[filename] = text
         save_overrides(overrides)
@@ -198,7 +270,7 @@ def api_override():
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
 
-# ---- ランダムテキスト 取得/保存 ----
+# ランダムテキスト取得/保存
 @app.get("/api/random_texts")
 def api_random_texts_get():
     return jsonify(ok=True, body=load_random_texts())
@@ -212,7 +284,7 @@ def api_random_texts_post():
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
 
-# ---- 並び順 保存 ----
+# 並び順 保存
 @app.post("/api/materials_order")
 def api_materials_order():
     try:
@@ -220,7 +292,6 @@ def api_materials_order():
         order = payload.get("order", [])
         if not isinstance(order, list):
             order = []
-        # 実在するファイルに限定
         existing = {p.name for p in OVERLAY_DIR.iterdir() if p.is_file()}
         order = [n for n in order if n in existing]
         save_materials_order(order)
@@ -228,16 +299,9 @@ def api_materials_order():
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
 
-# ---- 投稿（選択のみ）----
+# 投稿（選択のみ）
 @app.post("/publish_selected")
 def publish_selected():
-    """
-    form:
-      account_no: int
-      filename: str
-      comment: str (空ならランダム)
-      share_to_feed: "on" or absent
-    """
     try:
         account_no = int(request.form.get("account_no", "1"))
         filename = (request.form.get("filename") or "").strip()
@@ -251,7 +315,7 @@ def publish_selected():
         if not overlay_path.exists():
             return jsonify(ok=False, error="overlay not found"), 404
 
-        bg_path = _pick_background_for_account(account_no)
+        bg_path = pick_background_for_account(account_no)
         if not bg_path:
             return jsonify(ok=False, error="background not found"), 404
 
@@ -267,41 +331,30 @@ def publish_selected():
     except Exception as e:
         return jsonify(ok=False, error=str(e), tb=traceback.format_exc()), 500
 
-# ---- 投稿（並び順で全部）----
+# 投稿（並び順で全部） + 全アカウント対応
 @app.post("/publish_all_ordered")
 def publish_all_ordered():
-    """
-    form:
-      account_no: int
-      all_accounts: "on" or absent （オンのとき、全アカウントに対して実行）
-      share_to_feed: "on" or absent
-    """
     try:
-        accounts_data = load_accounts().get("accounts", [])
+        accs = load_accounts_any()
         account_no = int(request.form.get("account_no", "1"))
         all_accounts_flag = request.form.get("all_accounts") == "on"
         share_to_feed = request.form.get("share_to_feed") == "on"
 
-        # 対象アカウントの集合
         target_nos: List[int]
         if all_accounts_flag:
             target_nos = []
-            for a in accounts_data:
+            for a in accs:
                 try:
                     n = int(str(a.get("no", "1")))
                     target_nos.append(n)
                 except Exception:
                     continue
-            target_nos = sorted(set(target_nos))
-            if not target_nos:
-                target_nos = [account_no]
+            target_nos = sorted(set(target_nos)) or [account_no]
         else:
             target_nos = [account_no]
 
-        # 並び順
         order = load_materials_order()
         if not order:
-            # 並び順が未設定ならファイル名昇順
             order = []
             for p in sorted(OVERLAY_DIR.iterdir()):
                 if p.is_file() and _is_allowed(p.name):
@@ -312,17 +365,15 @@ def publish_all_ordered():
 
         results: List[Dict[str, Any]] = []
         for no in target_nos:
-            bg = _pick_background_for_account(no)
+            bg = pick_background_for_account(no)
             if not bg:
                 results.append({"account_no": no, "ok": False, "error": "background not found"})
                 continue
-
             for fname in order:
                 overlay = OVERLAY_DIR / fname
                 if not overlay.exists():
                     results.append({"account_no": no, "filename": fname, "ok": False, "error": "overlay not found"})
                     continue
-
                 comment = (overrides.get(fname, "") or "").strip() or None
                 try:
                     media_id = core.post_reel(
@@ -339,18 +390,46 @@ def publish_all_ordered():
     except Exception as e:
         return jsonify(ok=False, error=str(e), tb=traceback.format_exc()), 500
 
-# ---- 静的ファイルの直接配信（必要に応じて）----
+# ---- 投稿ログAPI（タブで見る用）----
+def _tail(path: Path, max_bytes: int = 50000) -> str:
+    if not path.exists():
+        return ""
+    try:
+        size = path.stat().st_size
+        if size <= max_bytes:
+            return path.read_text(encoding="utf-8", errors="ignore")
+        with path.open("rb") as f:
+            f.seek(size - max_bytes)
+            data = f.read().decode("utf-8", errors="ignore")
+            return data
+    except Exception:
+        try:
+            return path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return ""
+
+@app.get("/api/logs")
+def api_logs():
+    # ?name=ig | core | all
+    name = (request.args.get("name") or "all").lower()
+    ig_log = LOG_DIR / "ig_publisher.log"
+    core_log = LOG_DIR / "core.log"
+
+    body = ""
+    if name in ("ig", "instagram"):
+        body = _tail(ig_log)
+    elif name in ("core", "movie", "compose"):
+        body = _tail(core_log)
+    else:
+        body = "=== ig_publisher.log ===\n" + _tail(ig_log) + "\n\n=== core.log ===\n" + _tail(core_log)
+
+    return Response(body, mimetype="text/plain; charset=utf-8")
+
+# 静的ファイル
 @app.get("/static/<path:filename>")
 def static_files(filename: str):
     return send_from_directory(str(STATIC_DIR), filename, as_attachment=False)
 
-# ============ エラービュー（保険） ============
-@app.get("/__app_error")
-def app_error_view():
-    # ここは import guard 方式をやめたので、通常は使われませんが保険で残します
-    return Response("No app.py import error captured.", mimetype="text/plain", status=200)
-
-# ============ ローカル起動 ============
+# ローカル確認用
 if __name__ == "__main__":
-    # ローカル確認用（Renderでは使われません）
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=True)
