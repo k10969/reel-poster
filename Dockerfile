@@ -1,15 +1,7 @@
-FROM python:3.9-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
+FROM python:3.13-slim
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-
-EXPOSE 8000
-CMD ["gunicorn","wsgi:app","-b","0.0.0.0:8000","--workers","1","--threads","1","--timeout","600","--keep-alive","5"]
+RUN python -m pip install --upgrade pip
+RUN apt-get update --allow-releaseinfo-change && apt-get install -y --no-install-recommends ffmpeg libmagic1
+RUN pip install -r requirements.txt
+CMD ["streamlit", "run", "app.py", "--server.port", "8080", "--server.enableCORS", "false", "--server.headless", "true"]
