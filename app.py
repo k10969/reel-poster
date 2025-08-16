@@ -1,16 +1,50 @@
-# poster_core_reel.py  — Python 3.9 互換版
-import os
-import random
-import logging
-from flask import Flask
-app = Flask(__name__)
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import Optional, List, Dict
+# ===== app.py の先頭に貼る（絶対に落ちないインポートガード）=====
+from flask import Flask, Response
+import traceback
 
-import numpy as np
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
-from PIL import Image, ImageDraw, ImageFont
+app = Flask(__name__)  # ← まず Flask インスタンスを公開しておく（WSGIが拾える）
+
+_APP_IMPORT_ERR = None
+try:
+    # ↓↓↓ ここに “今まで app.py の先頭にあった import” を移動する ↓↓↓
+    # 例:
+    # import os, json
+    # from pathlib import Path
+    # from moviepy.editor import VideoFileClip
+    # from settings_store import load_accounts, save_accounts, ...
+    # from poster_core_reel import PosterCoreReel
+    # …（あなたの既存の import 群を全部ここへ）
+    # ===== ここまでガード =====# poster_core_reel.py  — Python 3.9 互換
+    import os
+    import random
+    import logging
+    from flask import Flask
+    app = Flask(__name__)
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+    from typing import Optional, List, Dict
+
+    import numpy as np
+    from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+    from PIL import Image, ImageDraw, ImageFont
+        pass
+    except Exception as e:
+    # ここに来たら “app.py の import 中” に失敗してる
+    _APP_IMPORT_ERR = "app.py import failed:\n" + "".join(
+        traceback.format_exception(type(e), e, e.__traceback__)
+    )
+
+# 失敗時は 500 と詳細を返す（起動自体は成功するので WSGIエラーは出ない）
+if _APP_IMPORT_ERR:
+    @app.get("/")
+    def _app_import_failed_root():
+        return "アプリ初期化に失敗しました。/__app_error を開いて詳細を確認してください。", 500
+
+    @app.get("/__app_error")
+    def _app_error():
+        return Response(_APP_IMPORT_ERR, mimetype="text/plain", status=500)
+
+    # 以降の本体ルート定義は “何もしない” でOK（import が通ってないので動かせないため）
 
 # 依存の存在チェック（どこで落ちたか見えるように）
 _missing: List[str] = []
