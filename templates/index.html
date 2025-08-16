@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>Instagram リール投稿ツール（GUI準拠・シンプル）</title>
+<title>Instagram リール投稿ツール（GUI準拠）</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   *{box-sizing:border-box}
@@ -11,7 +11,7 @@
   .toolbar{display:flex;gap:10px;align-items:center;padding:10px 12px;background:#2f343d;color:#fff}
   .toolbar .tab{padding:6px 10px;border-radius:8px;cursor:pointer}
   .toolbar .tab.active{background:#0ea5ff}
-  .right{margin-left:auto;display:flex;gap:8px}
+  .right{margin-left:auto;display:flex;gap:8px;align-items:center}
   .panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;margin-top:10px}
   .panel-hd{padding:10px 12px;border-bottom:1px solid #eef1f5;font-weight:600}
   .panel-bd{padding:12px}
@@ -25,13 +25,11 @@
   th,td{border-bottom:1px solid #eef1f5;padding:8px;vertical-align:middle}
   .thumb{width:110px;height:110px;object-fit:cover;border:1px solid #eef1f5;border-radius:8px;background:#fafafa}
   .handle{cursor:grab;text-align:center;width:28px;color:#94a3b8;font-size:18px}
-  .note{font-size:12px;color:#334155;background:#fff8c4;border:1px solid #ffe58f;padding:6px 8px;border-radius:8px}
-  .hidden{display:none}
-  .rowbtns{display:flex;gap:8px;justify-content:flex-end}
   tr.selected{background:#f0f9ff}
   .grow{flex:1}
   .progress{height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden}
   .bar{height:100%;background:#0ea5ff;width:0%}
+  .hidden{display:none}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
@@ -42,15 +40,19 @@
   <div class="tab active" id="tabPost">投稿</div>
   <div class="tab" id="tabRand">ランダムテキスト</div>
   <div class="tab" id="tabLog">投稿ログ</div>
+
   <div class="right">
-    <button class="primary" onclick="postSelected()">選択した素材を投稿</button>
-    <button onclick="postBatch()">並び順で全部投稿</button>
+    <label style="display:flex;gap:6px;align-items:center">
+      <input type="checkbox" id="allAcc"> 全アカウント（分散投稿）
+    </label>
+    <select id="accSelect" style="min-width:380px"></select>
+    <button id="postBtn" class="primary" onclick="postExecute()" disabled>投稿実行</button>
   </div>
 </div>
 
 <div class="wrap">
 
-  <!-- アカウント -->
+  <!-- アカウント設定（簡易） -->
   <div class="panel" id="panelPost">
     <div class="panel-bd">
       <div class="row">
@@ -65,23 +67,21 @@
         <button class="danger" onclick="delAcc()">削除</button>
       </div>
       <div class="row" style="margin-top:8px">
-        <select id="accSelect" style="min-width:420px"></select>
-        <button onclick="reloadAcc()">更新</button>
-        <span class="muted">アカウント選択（背景は番号に連動）</span>
+        <button onclick="reloadAcc()">アカウント一覧を更新</button>
+        <span class="muted">※背景はアカ番号に自動連動（1→1.mp4 / background1.mp4 / bg1.mp4）</span>
       </div>
     </div>
   </div>
 
-  <!-- 素材一覧（サムネ + テキストのみ） -->
+  <!-- 素材一覧（サムネ＋右にコメント入力。※投稿タブにランダム文言の説明は一切なし） -->
   <div class="panel">
-    <div class="panel-hd">overlay_input の素材（行タップで選択／行DnDで順序変更／右列入力でコメント編集）</div>
+    <div class="panel-hd">overlay_input の素材一覧（行選択=単発投稿／未選択=全件、DnDで順序変更）</div>
     <div class="panel-bd">
       <div class="row" style="margin-bottom:8px">
         <form action="/upload?target=overlay" method="post" enctype="multipart/form-data" class="row">
           <input type="file" name="file" accept="image/*,video/*" required>
-          <button>＋素材追加（iPhoneから）</button>
+          <button>＋素材追加（iPhone）</button>
         </form>
-        <div class="note">テキストが空の行は、投稿時に <code>random_texts.txt</code> からランダムに選ばれます。</div>
       </div>
 
       <table>
@@ -89,15 +89,15 @@
           <tr>
             <th style="width:34px;"></th>
             <th style="width:130px;">サムネ</th>
-            <th>テキスト（空ならランダム）</th>
-            <th style="width:120px;"></th>
+            <th>コメント</th>
+            <th style="width:110px;"></th>
           </tr>
         </thead>
         <tbody id="tbl">
           {% for item in ov_rows %}
           <tr data-fname="{{ item.name }}">
             <td class="handle">☰</td>
-            <td onclick="toggleSelect(this.closest('tr'))">
+            <td onclick="toggleSelect(this.closest('tr'))" title="クリックで選択／解除、ダブルクリックでプレビュー">
               {% if item.thumb %}
                 <img class="thumb" src="/{{ item.thumb }}" ondblclick="openPreview('{{ item.name }}')">
               {% else %}
@@ -105,9 +105,9 @@
               {% endif %}
             </td>
             <td ondblclick="this.querySelector('input').focus()">
-              <input type="text" class="txt grow" value="{{ item.text|e }}" placeholder="空= random_texts.txt からランダム" style="width:100%">
+              <input type="text" class="txt grow" value="{{ item.text|e }}" placeholder="コメントを入力" style="width:100%">
             </td>
-            <td class="rowbtns">
+            <td>
               <form action="/materials/delete" method="post" onsubmit="return confirm('削除しますか？')" style="margin:0">
                 <input type="hidden" name="filename" value="{{ item.name|e }}">
                 <button class="danger" type="submit">削除</button>
@@ -116,21 +116,21 @@
           </tr>
           {% endfor %}
           {% if ov_rows|length == 0 %}
-          <tr><td></td><td colspan="3" class="muted">素材がありません。上の「＋素材追加」からアップロードしてください。</td></tr>
+          <tr><td></td><td colspan="3" class="muted">素材がありません。「＋素材追加」からアップロードしてください。</td></tr>
           {% endif %}
         </tbody>
       </table>
 
-      <div class="muted" style="margin-top:8px">順序と各行のテキストは **自動保存** されます。</div>
+      <div class="muted" style="margin-top:8px">順序と各行のコメントは <b>自動保存</b> されます。</div>
     </div>
   </div>
 
-  <!-- ランダムテキスト -->
+  <!-- ランダムテキスト（編集はここだけ） -->
   <div class="panel hidden" id="panelRand">
     <div class="panel-hd">ランダムテキスト（入力すると自動保存）</div>
     <div class="panel-bd">
       <textarea id="randArea" class="grow" style="width:100%;height:50vh" placeholder="1行1テキストで入力"></textarea>
-      <div class="muted" style="margin-top:6px">保存しました：<span id="randSaved">未保存</span></div>
+      <div class="muted" style="margin-top:6px">保存：<span id="randSaved">未保存</span></div>
     </div>
   </div>
 
@@ -160,135 +160,114 @@
   tabPost.onclick = () => setActive(tabPost);
   tabRand.onclick = () => { setActive(tabRand); loadRandomTexts(); };
 
-  // 並べ替え
+  // 並べ替え＆コメント 自動保存
   const sort = new Sortable(document.getElementById('tbl'), {
     animation:150, handle:'.handle',
-    onSort: debounce(saveMaterials, 700)
+    onSort: debounce(saveMaterials, 400)
   });
-
-  // テキスト自動保存
   document.querySelectorAll('#tbl input.txt').forEach(inp=>{
-    inp.addEventListener('input', debounce(saveMaterials, 700));
+    inp.addEventListener('input', debounce(saveMaterials, 400));
   });
-
   async function saveMaterials(){
     const rows = [...document.querySelectorAll('#tbl tr[data-fname]')];
     const order = rows.map(r => r.dataset.fname);
     const texts = {};
     rows.forEach(r => { texts[r.dataset.fname] = r.querySelector('input.txt').value; });
-    await fetch('/materials/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order,texts})});
+    await fetch('/materials/sync',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({order,texts})
+    });
   }
 
-  // 行選択
-  function toggleSelect(tr){
-    tr.classList.toggle('selected');
-  }
+  // 行選択（トグル）＋プレビュー
+  function toggleSelect(tr){ tr.classList.toggle('selected'); }
+  function openPreview(name){ window.open(`/preview/overlay_input/${encodeURIComponent(name)}`,'_blank'); }
+  function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn.apply(this,a),ms); }; }
 
-  // ランダムテキスト 読み込み＆保存
+  // ランダムテキスト（このタブだけで編集）
   let randLoaded=false, randTimer=null;
   async function loadRandomTexts(){
     if(randLoaded) return;
-    const r = await fetch('/random_texts_content');
-    const js = await r.json();
+    const r = await fetch('/random_texts_content'); const js = await r.json();
     document.getElementById('randArea').value = js.text || '';
-    randLoaded = true;
-    document.getElementById('randSaved').textContent = '読み込み済み';
+    randLoaded = true; document.getElementById('randSaved').textContent = '読み込み済み';
   }
   const randArea = document.getElementById('randArea');
   if(randArea){
     randArea.addEventListener('input', ()=>{
       clearTimeout(randTimer);
       randTimer = setTimeout(async ()=>{
-        const body = { body: randArea.value };
-        const res = await fetch('/random_texts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-        if(res.ok){ document.getElementById('randSaved').textContent = new Date().toLocaleTimeString(); }
-      }, 500);
+        await fetch('/random_texts',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({body:randArea.value})
+        });
+        document.getElementById('randSaved').textContent = new Date().toLocaleTimeString();
+      }, 400);
     });
-  }
-
-  // 投稿（選択行）
-  async function postSelected(){
-    const sel = document.querySelector('#tbl tr.selected');
-    if(!sel){ alert('素材を1つ選択してください（行をタップ）'); return; }
-    const overlay_name = sel.dataset.fname;
-    const account_no = document.getElementById('accSelect').value;
-    await doPost({account_no, overlay_name});
-  }
-
-  // 投稿（バッチ）
-  async function postBatch(){
-    const account_no = document.getElementById('accSelect').value;
-    const statusEl = document.getElementById('status');
-    const bar = document.getElementById('bar');
-    if(statusEl) statusEl.textContent = 'バッチ投稿中…';
-    if(bar) bar.style.width = '10%';
-    const r = await fetch('/batch_generate_and_post',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ account_no, limit: 0 })
-    });
-    const js = await r.json().catch(()=>({}));
-    if(bar) bar.style.width = '100%';
-    if(!r.ok || js.ok === false){
-      alert('一括投稿失敗: ' + (js.error || r.statusText));
-      if(statusEl) statusEl.textContent = 'エラー';
-      return;
-    }
-    alert('一括投稿 完了');
-    if(statusEl) statusEl.textContent = '完了';
-  }
-
-  // 投稿の実処理
-  async function doPost(payload){
-    const statusEl = document.getElementById('status');
-    const bar = document.getElementById('bar');
-    if(statusEl) statusEl.textContent = '投稿中…';
-    if(bar) bar.style.width = '30%';
-    const r = await fetch('/generate_and_post', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const js = await r.json().catch(()=>({}));
-    if(bar) bar.style.width = '100%';
-    if(!r.ok || js.ok === false){
-      alert('投稿失敗: ' + (js.error || r.statusText));
-      if(statusEl) statusEl.textContent = 'エラー';
-      return;
-    }
-    alert('投稿完了！ media_id=' + js.media_id);
-    if(statusEl) statusEl.textContent = '完了';
   }
 
   // アカウントAPI
   async function reloadAcc(){
     const r = await fetch('/accounts'); const js = await r.json();
-    const sel = document.getElementById('accSelect'); if(sel) sel.innerHTML='';
-    (js.accounts||[]).forEach(a => {
-      const label = `${a.no}. ${a.label||''} (IG:${a.ig_user_id||''})`;
-      const opt=document.createElement('option'); opt.value=a.no; opt.textContent=label; sel.appendChild(opt);
+    const sel = document.getElementById('accSelect'); sel.innerHTML='';
+    (js.accounts||[]).forEach(a=>{
+      const opt=document.createElement('option');
+      opt.value=a.no; opt.textContent=`${a.no}. ${a.label||''} (IG:${a.ig_user_id||''})`;
+      sel.appendChild(opt);
     });
+    document.getElementById('postBtn').disabled = !(js.accounts && js.accounts.length);
   }
-  async function upsertAcc(){
-    const body = {
-      no: document.getElementById('accNo').value.trim(),
-      label: document.getElementById('accLabel').value.trim(),
-      ig_user_id: document.getElementById('accIG').value.trim(),
-      page_id: document.getElementById('accPage').value.trim(),
-      access_token: document.getElementById('accToken').value.trim()
-    };
-    const r = await fetch('/accounts/upsert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(r.ok){ alert('保存しました'); reloadAcc(); } else { alert('保存に失敗'); }
-  }
-  async function delAcc(){
-    const no = document.getElementById('accNo').value.trim();
-    if(!no) return alert('番号を入れてください');
-    const r = await fetch('/accounts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({no})});
-    if(r.ok){ alert('削除しました'); reloadAcc(); } else { alert('削除に失敗'); }
-  }
-  function tokenRefresh(){ alert('トークン更新（API連携は本体側で）'); }
-  function tokenCheck(){ alert('有効期限チェック（API連携は本体側で）'); }
 
-  function openPreview(name){ window.open(`/preview/overlay_input/${encodeURIComponent(name)}`,'_blank'); }
-  function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn.apply(this,a),ms); }; }
+  function tokenRefresh(){ alert('トークン更新（バックエンドで実装可）'); }
+  function tokenCheck(){ alert('期限チェック（バックエンドで実装可）'); }
+
+  // 投稿：選択=単発、未選択=全件。全アカONで全アカ投稿。
+  async function postExecute(){
+    const allAcc = document.getElementById('allAcc').checked;
+    const accSel = document.getElementById('accSelect');
+    const account_no = accSel && accSel.value ? accSel.value : '';
+
+    const selected = [...document.querySelectorAll('#tbl tr.selected')].map(r=>r.dataset.fname);
+    const overlay_names = selected.length ? selected
+      : [...document.querySelectorAll('#tbl tr[data-fname]')].map(r=>r.dataset.fname);
+
+    if (!overlay_names.length){
+      alert('投稿する素材がありません'); return;
+    }
+    if (!allAcc && !account_no){
+      alert('アカウントを選択してください'); return;
+    }
+
+    const payload = allAcc ? { overlay_names, all_accounts:true }
+                           : { overlay_names, all_accounts:false, account_no };
+
+    setStatus('投稿中…', 20);
+
+    const r = await fetch('/post', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const js = await r.json().catch(()=>({}));
+    setStatus('完了', 100);
+
+    if(!r.ok || js.ok === false){
+      alert('投稿失敗: ' + (js.error || r.statusText));
+      console.log(js);
+      return;
+    }
+    alert('投稿完了！');
+    console.log(js);
+  }
+
+  // 進捗バー
+  function setStatus(label, percent){
+    const statusEl = document.getElementById('status');
+    const bar = document.getElementById('bar');
+    if(statusEl) statusEl.textContent = label;
+    if(bar) bar.style.width = (percent||0) + '%';
+  }
 
   // 初期
   reloadAcc();
