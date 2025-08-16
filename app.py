@@ -1,168 +1,519 @@
 import os
-import time
+import io
 import json
-from dotenv import load_dotenv
-from cloudinary_helper import upload_media_local
-from graph_publisher import ig_post_now
-load_dotenv()  # .env を読み込む（Renderもローカルも対応）
-
+import random
+from datetime import datetime
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    send_from_directory, abort
+    send_from_directory, jsonify, abort
 )
-from werkzeug.utils import secure_filename
 
-# MoviePy 1.0.3 想定
-from moviepy.editor import VideoFileClip, CompositeVideoClip, ImageClip, vfx
+# 画像/動画処理
 from PIL import Image, ImageDraw, ImageFont
-import numpy as np
+from moviepy.editor import VideoFileClip, CompositeVideoClip, ImageClip, vfx
 
-BASE_DIR = Path(__file__).parent.resolve()
+# 環境・外部連携
+from dotenv import load_dotenv
+from cloudinary_helper import upload_media_local
+from graph_publisher import ig_post_now
+from settings_store import (
+    load_accounts as _load_accounts,
+    save_accounts as _save_accounts,
+    cloud_backup, cloud_restore
+)
+
+# =======================================
+# パス/ディレクトリ初期化
+# =======================================
+BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
-BACKGROUND_DIR = STATIC_DIR / "backgrounds"
-OVERLAY_DIR = STATIC_DIR / "overlay_input"
-THUMB_DIR = STATIC_DIR / "thumbs"
-OUTPUT_DIR = STATIC_DIR / "output"
+BG_DIR = STATIC_DIR / "backgrounds"
+OV_DIR = STATIC_DIR / "overlay_input"
+OUT_DIR = STATIC_DIR / "output"
+TH_DIR = STATIC_DIR / "thumbs"
+FONT_FILE = STATIC_DIR / "fonts" / "keifont.ttf"
+
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+ORDER_JSON = DATA_DIR / "materials_order.json"
+OVERRIDES_JSON = DATA_DIR / "material_overrides.json"
 RANDOM_TXT = BASE_DIR / "random_texts.txt"
 
-MATERIALS_ORDER = BASE_DIR / "materials_order.json"
-MATERIAL_OVERRIDES = BASE_DIR / "material_overrides.json"
-ACCOUNTS_JSON = BASE_DIR / "accounts.json"
+for d in [BG_DIR, OV_DIR, OUT_DIR, TH_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".webp"}
-VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
-
-for p in (BACKGROUND_DIR, OVERLAY_DIR, THUMB_DIR, OUTPUT_DIR):
-    p.mkdir(parents=True, exist_ok=True)
-
-if not RANDOM_TXT.exists():
-    RANDOM_TXT.write_text("やばい\nおもしろすぎる\nこれすごい\n", encoding="utf-8")
-
-DISABLE_THUMBS = os.getenv("DISABLE_THUMBS") == "1"
+# =======================================
+# Flask & 環境
+# =======================================
+load_dotenv()     # Render の Environment もここで読み込まれる
+try:
+    cloud_restore()  # Cloudinary の raw（accounts/settings）から復元（存在すれば）
+except Exception:
+    # 復元失敗は致命的ではないので無視
+    pass
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512MB
 
-# -------- utils --------
-def is_allowed(filename: str) -> bool:
-    return Path(filename).suffix.lower() in ALLOWED_EXTS
+# =======================================
+# ユーティリティ
+# =======================================
+def list_media(dirpath: Path, exts: Tuple[str, ...]) -> List[str]:
+    return sorted([p.name for p in dirpath.iterdir() if p.is_file() and p.suffix.lower() in exts])
 
-def is_video(filename: str) -> bool:
-    return Path(filename).suffix.lower() in VIDEO_EXTS
+def is_video_name(name: str) -> bool:
+    return Path(name).suffix.lower() in (".mp4", ".mov", ".m4v", ".webm")
 
-def list_files_sorted(folder: Path):
-    files = [f.name for f in folder.iterdir() if f.is_file() and is_allowed(f.name)]
-    files.sort(key=lambda n: (folder / n).stat().st_mtime, reverse=True)
-    return files
+def is_image_name(name: str) -> bool:
+    return Path(name).suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
 
-def ensure_thumbnail(src_path: Path, thumb_path: Path, width: int = 320) -> None:
-    if thumb_path.exists():
-        return
-    if is_video(src_path.name):
-        with VideoFileClip(str(src_path)) as clip:
-            t = min(1.0, max(0.0, clip.duration / 3.0))
-            thumb_path.parent.mkdir(parents=True, exist_ok=True)
-            clip.save_frame(str(thumb_path), t=t)
-    else:
-        img = Image.open(src_path).convert("RGB")
-        w, h = img.size
-        if w > width:
-            r = width / w
-            img = img.resize((int(w * r), int(h * r)))
-        thumb_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(thumb_path, "JPEG", quality=85)
+def load_order() -> List[str]:
+    if ORDER_JSON.exists():
+        try:
+            return json.loads(ORDER_JSON.read_text("utf-8"))
+        except Exception:
+            return []
+    return []
 
-def safe_join(folder: Path, filename: str) -> Path:
-    name = secure_filename(filename)
-    p = folder / name
-    if not p.resolve().is_relative_to(folder.resolve()):
-        abort(400)
-    return p
+def save_order(order: List[str]):
+    ORDER_JSON.write_text(json.dumps(order, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def calc_position(pos_key: str, bg_w: int, bg_h: int, ov_w: int, ov_h: int) -> Tuple[int, int]:
-    m = 12
-    mapping = {
-        "top-left": (m, m),
-        "top-right": (bg_w - ov_w - m, m),
-        "bottom-left": (m, bg_h - ov_h - m),
-        "bottom-right": (bg_w - ov_w - m, bg_h - ov_h - m),
-        "center": ((bg_w - ov_w) // 2, (bg_h - ov_h) // 2),
-    }
-    return mapping.get(pos_key, mapping["top-right"])
+def load_overrides() -> dict:
+    if OVERRIDES_JSON.exists():
+        try:
+            return json.loads(OVERRIDES_JSON.read_text("utf-8"))
+        except Exception:
+            return {}
+    return {}
 
-def render_text_image(text: str, font_size: int = 64, color: str = "#ffffff",
-                      stroke_width: int = 4, stroke_color: str = "#000000",
-                      padding: int = 16) -> Image.Image:
+def save_overrides(js: dict):
+    OVERRIDES_JSON.write_text(json.dumps(js, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def random_line() -> str:
+    if RANDOM_TXT.exists():
+        lines = [l.strip() for l in RANDOM_TXT.read_text("utf-8").splitlines() if l.strip()]
+        if lines:
+            return random.choice(lines)
+    return ""
+
+def ensure_thumb(src_path: Path) -> str:
+    """
+    動画は1秒目を、画像はそのまま縮小して thumbnail を生成。
+    返り値: Flask から参照できる 'static/thumbs/xxx.jpg' 相対パス。失敗時は ""。
+    """
+    th_name = src_path.name + ".jpg"
+    th_path = TH_DIR / th_name
+    if th_path.exists():
+        return f"static/thumbs/{th_name}"
     try:
-        custom_font = BASE_DIR / "static" / "fonts" / "keifont.ttf"
-        if custom_font.exists():
-            font = ImageFont.truetype(str(custom_font), font_size)
+        if is_video_name(src_path.name):
+            with VideoFileClip(str(src_path)) as clip:
+                t = 1.0 if (clip.duration or 0) >= 1.0 else 0.0
+                frame = clip.get_frame(t)
+            im = Image.fromarray(frame)
         else:
-            font = ImageFont.load_default()
+            im = Image.open(src_path).convert("RGB")
+        im.thumbnail((320, 320))
+        th_path.parent.mkdir(parents=True, exist_ok=True)
+        im.save(th_path, "JPEG", quality=85)
+        return f"static/thumbs/{th_name}"
     except Exception:
+        return ""
+
+def text_to_image(
+    text: str,
+    font_size: int = 64,
+    color: str = "#ffffff",
+    stroke_width: int = 4,
+    stroke_color: str = "#000000",
+    padding: int = 16,
+) -> Image.Image:
+    """
+    同梱フォント（static/fonts/keifont.ttf）を使って、縁取りテキスト画像を生成
+    """
+    # フォント決定
+    if FONT_FILE.exists():
+        font = ImageFont.truetype(str(FONT_FILE), font_size)
+    else:
         font = ImageFont.load_default()
 
-    dummy = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
-    d0 = ImageDraw.Draw(dummy)
-    bbox = d0.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
+    # サイズ計測
+    temp_img = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(temp_img)
+    bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
+    # 実画像
     img = Image.new("RGBA", (w + padding * 2, h + padding * 2), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.text((padding, padding), text, font=font, fill=color,
-              stroke_width=stroke_width, stroke_fill=stroke_color)
+    draw2 = ImageDraw.Draw(img)
+    draw2.text(
+        (padding, padding),
+        text,
+        font=font,
+        fill=color,
+        stroke_width=stroke_width,
+        stroke_fill=stroke_color,
+    )
     return img
 
-def _load_json(p: Path, default):
+def map_pos(pos: str, base_w: int, base_h: int, clip_w: int, clip_h: int) -> Tuple[int, int]:
+    """
+    pos: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left' | 'center'
+    を左上座標(x,y)に変換
+    """
+    if pos == "top-right":
+        return (base_w - clip_w, 0)
+    if pos == "top-left":
+        return (0, 0)
+    if pos == "bottom-right":
+        return (base_w - clip_w, base_h - clip_h)
+    if pos == "bottom-left":
+        return (0, base_h - clip_h)
+    # center
+    return ((base_w - clip_w) // 2, (base_h - clip_h) // 2)
+
+# =======================================
+# ルーティング
+# =======================================
+@app.route("/")
+def index():
+    # 背景一覧（動画）
+    bg_list = list_media(BG_DIR, (".mp4", ".mov", ".m4v", ".webm"))
+    bg_rows = [(name, ensure_thumb(BG_DIR / name)) for name in bg_list]
+
+    # 素材一覧（画像/動画）
+    ov_raw = list_media(OV_DIR, (".mp4", ".mov", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp"))
+    order = load_order()
+    overrides = load_overrides()
+    # 順序に従って並べ替え（未知のものは末尾）
+    ordered = [n for n in order if n in ov_raw] + [n for n in ov_raw if n not in order]
+    ov_rows = []
+    for name in ordered:
+        ov_rows.append({
+            "name": name,
+            "thumb": ensure_thumb(OV_DIR / name),
+            "text": overrides.get(name, ""),
+        })
+
+    # 出力一覧（動画）
+    outs_rows = list_media(OUT_DIR, (".mp4", ".mov", ".m4v", ".webm"))
+
+    return render_template(
+        "index.html",
+        bg_rows=bg_rows,
+        ov_rows=ov_rows,
+        outs_rows=outs_rows,
+    )
+
+@app.route("/random_texts")
+def random_texts_view():
+    txt = ""
+    if RANDOM_TXT.exists():
+        txt = RANDOM_TXT.read_text("utf-8")
+    return f"""
+    <h2>random_texts.txt</h2>
+    <form method="post" action="{url_for('random_texts_update')}">
+    <textarea name="body" style="width:96%;height:60vh;">{txt}</textarea><br>
+    <button>保存</button>
+    </form>
+    <p><a href="/">戻る</a></p>
+    """
+
+@app.route("/random_texts", methods=["POST"])
+def random_texts_update():
+    body = request.form.get("body", "")
+    RANDOM_TXT.write_text(body, encoding="utf-8")
+    return redirect(url_for("random_texts_view"))
+
+@app.route("/static/<path:subpath>")
+def static_passthrough(subpath):
+    # 既定の static と同じだが、相対で配りやすくするため明示
+    target = STATIC_DIR / subpath
+    if not target.exists():
+        abort(404)
+    return send_from_directory(STATIC_DIR, subpath)
+
+@app.route("/preview/<kind>/<filename>")
+def preview(kind: str, filename: str):
+    # kind: 'overlay_input' | 'backgrounds' | 'output'
+    base = {
+        "overlay_input": OV_DIR,
+        "backgrounds": BG_DIR,
+        "output": OUT_DIR,
+    }.get(kind)
+    if not base:
+        abort(404)
+    path = base / filename
+    if not path.exists():
+        abort(404)
+    # 単純にファイル配信
+    rel = f"{base.relative_to(BASE_DIR)}/{filename}"
+    return f"""
+    <h2>Preview: {kind}/{filename}</h2>
+    { '<video controls style="max-width:90vw" src="/' + rel + '"></video>' if is_video_name(filename) else '<img style="max-width:90vw" src="/' + rel + '"/>' }
+    <p><a href="/">戻る</a></p>
+    """
+
+@app.route("/download/output/<filename>")
+def download_output(filename: str):
+    path = OUT_DIR / filename
+    if not path.exists():
+        abort(404)
+    return send_from_directory(OUT_DIR, filename, as_attachment=True)
+
+# ---------- アップロード ----------
+@app.route("/upload", methods=["POST"])
+def upload():
+    target = request.args.get("target", "overlay")
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return redirect(url_for("index"))
+
+    if target == "backgrounds":
+        dest_dir = BG_DIR
+    else:
+        dest_dir = OV_DIR
+
+    dest = dest_dir / Path(f.filename).name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    f.save(dest)
+
+    # サムネ生成（非致命）
     try:
-        if p.exists():
-            return json.loads(p.read_text(encoding="utf-8"))
+        ensure_thumb(dest)
     except Exception:
         pass
-    return default
 
-def _save_json(p: Path, obj):
-    p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    return redirect(url_for("index"))
 
-load_dotenv()
+# ---------- 素材：順序/テキストの保存 ----------
+@app.route("/materials/sync", methods=["POST"])
+def materials_sync():
+    js = request.get_json(silent=True) or {}
+    order = js.get("order", [])
+    texts = js.get("texts", {})
 
-@app.route("/publish", methods=["POST"])
-def publish_reel():
+    if isinstance(order, list):
+        save_order(order)
+    if isinstance(texts, dict):
+        # 既存とマージ（空文字は空で保持）
+        cur = load_overrides()
+        cur.update(texts)
+        save_overrides(cur)
+    return jsonify({"ok": True})
+
+@app.route("/materials/delete", methods=["POST"])
+def materials_delete():
+    filename = request.form.get("filename", "")
+    if not filename:
+        return redirect(url_for("index"))
+    p = OV_DIR / Path(filename).name
+    if p.exists():
+        try:
+            p.unlink()
+        except Exception:
+            pass
+    # サムネも削除
+    th = TH_DIR / (Path(filename).name + ".jpg")
+    if th.exists():
+        try:
+            th.unlink()
+        except Exception:
+            pass
+    return redirect(url_for("index"))
+
+# ---------- 合成 ----------
+@app.route("/combine", methods=["POST"])
+def combine():
+    background = request.form.get("background", "").strip()
+    overlay = request.form.get("overlay", "").strip()
+    pos = request.form.get("pos", "top-right")
+    size_pct = float(request.form.get("size_pct", "50") or 50)
+    duration_mode = request.form.get("duration_mode", "shortest")  # shortest | background
+    fadein = float(request.form.get("fadein", "0") or 0)
+
+    text_enable = request.form.get("text_enable") == "on"
+    text_mode = request.form.get("text_mode", "custom")  # custom | random
+    text_input = request.form.get("text_input", "").strip()
+    text_pos = request.form.get("text_pos", "top-left")
+    text_size = int(float(request.form.get("text_size", "64") or 64))
+
+    if not background or not overlay:
+        return redirect(url_for("index"))
+
+    bg_path = BG_DIR / background
+    ov_path = OV_DIR / overlay
+    if not (bg_path.exists() and ov_path.exists()):
+        return redirect(url_for("index"))
+
+    # テキスト決定
+    overrides = load_overrides()
+    material_text = overrides.get(overlay, "")
+    if text_input:
+        text_content = text_input
+    elif text_mode == "random":
+        text_content = random_line()
+    else:
+        text_content = material_text
+
+    # 出力ファイル名
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_name = f"{Path(background).stem}__{Path(overlay).stem}__{stamp}.mp4"
+    out_path = OUT_DIR / out_name
+
+    # 合成
+    try:
+        with VideoFileClip(str(bg_path)) as bg:
+            clips = [bg]
+            # overlay
+            if is_video_name(overlay):
+                with VideoFileClip(str(ov_path)) as ov:
+                    # リサイズ
+                    scale = max(10.0, min(200.0, size_pct)) / 100.0
+                    new_h = int(bg.h * scale)
+                    ov_resized = ov.resize(height=new_h)
+                    # 位置
+                    x, y = map_pos(pos, bg.w, bg.h, ov_resized.w, ov_resized.h)
+                    ov_resized = ov_resized.set_position((x, y))
+                    if fadein > 0:
+                        ov_resized = ov_resized.fx(vfx.fadein, fadein)
+                    clips.append(ov_resized)
+
+                    # テキスト
+                    if text_enable and text_content:
+                        img = text_to_image(text_content, font_size=text_size)
+                        # 画像を MoviePy Clip に
+                        bio = io.BytesIO()
+                        img.save(bio, format="PNG")
+                        bio.seek(0)
+                        text_clip = ImageClip(bio).set_duration(ov.duration if duration_mode == "shortest" else bg.duration)
+                        # テキストサイズに準じて位置
+                        txt_w, txt_h = img.size
+                        tx, ty = map_pos(text_pos, bg.w, bg.h, txt_w, txt_h)
+                        text_clip = text_clip.set_position((tx, ty))
+                        clips.append(text_clip)
+
+                    # 書き出し
+                    dur = min(bg.duration, ov.duration) if duration_mode == "shortest" else bg.duration
+                    final = CompositeVideoClip(clips).set_duration(dur)
+                    final.write_videofile(
+                        str(out_path),
+                        codec="libx264",
+                        audio_codec="aac",
+                        fps=bg.fps or 24,
+                        threads=2,
+                        preset="medium",
+                        verbose=False,
+                        logger=None,
+                    )
+            else:
+                # overlay が画像
+                img = Image.open(ov_path).convert("RGBA")
+                # Pillow→ImageClip
+                bio = io.BytesIO()
+                img.save(bio, format="PNG")
+                bio.seek(0)
+                scale = max(10.0, min(200.0, size_pct)) / 100.0
+                target_h = int(bg.h * scale)
+                ov_clip = ImageClip(bio).set_duration(bg.duration).resize(height=target_h)
+                x, y = map_pos(pos, bg.w, bg.h, ov_clip.w, ov_clip.h)
+                ov_clip = ov_clip.set_position((x, y))
+                if fadein > 0:
+                    ov_clip = ov_clip.fx(vfx.fadein, fadein)
+                clips.append(ov_clip)
+
+                if text_enable and text_content:
+                    timg = text_to_image(text_content, font_size=text_size)
+                    tbio = io.BytesIO()
+                    timg.save(tbio, format="PNG")
+                    tbio.seek(0)
+                    text_clip = ImageClip(tbio).set_duration(bg.duration)
+                    txt_w, txt_h = timg.size
+                    tx, ty = map_pos(text_pos, bg.w, bg.h, txt_w, txt_h)
+                    text_clip = text_clip.set_position((tx, ty))
+                    clips.append(text_clip)
+
+                final = CompositeVideoClip(clips).set_duration(bg.duration)
+                final.write_videofile(
+                    str(out_path),
+                    codec="libx264",
+                    audio_codec="aac",
+                    fps=bg.fps or 24,
+                    threads=2,
+                    preset="medium",
+                    verbose=False,
+                    logger=None,
+                )
+
+    except Exception as e:
+        return f"Error in combine: {e}", 500
+
+    # サムネ準備
+    try:
+        ensure_thumb(out_path)
+    except Exception:
+        pass
+
+    return redirect(url_for("index"))
+
+# ---------- アカウントAPI ----------
+@app.route("/accounts", methods=["GET"])
+def accounts_list():
+    return jsonify(_load_accounts())
+
+@app.route("/accounts/upsert", methods=["POST"])
+def accounts_upsert():
     data = request.get_json(silent=True) or {}
-    acc_no = str(data.get("account_no", "")).strip()
-    video_path = data.get("video_path")
-    caption = data.get("caption", "")
-
-    # アカウント取得
+    no = str(data.get("no", "")).strip()
+    if not no:
+        return {"ok": False, "error": "no required"}, 400
     accs = _load_accounts()
-    account = next((a for a in accs["accounts"] if str(a.get("no")) == acc_no), None)
-    if not account:
-        return {"ok": False, "error": "account not found"}, 404
+    found = False
+    for a in accs.get("accounts", []):
+        if str(a.get("no", "")) == no:
+            a.update({
+                "no": no,
+                "label": data.get("label", ""),
+                "ig_user_id": data.get("ig_user_id", ""),
+                "page_id": data.get("page_id", ""),
+                "access_token": data.get("access_token", a.get("access_token", "")),
+            })
+            found = True
+            break
+    if not found:
+        accs.setdefault("accounts", []).append({
+            "no": no,
+            "label": data.get("label", ""),
+            "ig_user_id": data.get("ig_user_id", ""),
+            "page_id": data.get("page_id", ""),
+            "access_token": data.get("access_token", ""),
+        })
+    _save_accounts(accs)
+    return {"ok": True}
 
-    ig_user_id = account["ig_user_id"]
-    access_token = account["access_token"]
+@app.route("/accounts/delete", methods=["POST"])
+def accounts_delete():
+    data = request.get_json(silent=True) or {}
+    no = str(data.get("no", "")).strip() or request.form.get("no", "").strip()
+    if not no:
+        return {"ok": False, "error": "no required"}, 400
+    accs = _load_accounts()
+    accs["accounts"] = [a for a in accs.get("accounts", []) if str(a.get("no", "")) != no]
+    _save_accounts(accs)
+    return {"ok": True}
 
-    # Cloudinaryにアップロード
-    url, res_type = upload_media_local(video_path)
-    if res_type != "video":
-        return {"ok": False, "error": "uploaded file is not video"}, 400
-
-    # IG投稿
-    result = ig_post_now(ig_user_id, url, True, caption, access_token)
-    return result
-@app.route("/publish", methods=["POST"])
-def publish_reel():
+# ---------- IG投稿（※エンドポイント名は一意に） ----------
+@app.route("/publish", methods=["POST"], endpoint="publish_reel")
+def publish_reel_api():
     """
     JSON入力:
     {
-      "account_no": "1",           # accounts.json 内の no
-      "filename": "xxx.mp4",       # static/output 内のファイル名
-      "caption": "任意キャプション"
+      "account_no": "1",
+      "filename": "output_xxx.mp4",  # static/output 内
+      "caption": "任意"
     }
     """
     data = request.get_json(silent=True) or {}
@@ -184,18 +535,18 @@ def publish_reel():
     if not ig_user_id or not access_token:
         return {"ok": False, "error": "ig_user_id/access_token missing"}, 400
 
-    # ファイル存在確認
-    local_path = safe_join(OUTPUT_DIR, filename)
+    # ファイル存在
+    local_path = OUT_DIR / Path(filename).name
     if not local_path.exists():
         return {"ok": False, "error": "file not found"}, 404
 
-    # Cloudinary へアップロード
+    # Cloudinaryへ
     try:
         url, rtype = upload_media_local(str(local_path))
     except Exception as e:
         return {"ok": False, "error": f"cloudinary upload failed: {e}"}, 500
 
-    # Graph API で投稿
+    # Graph API 投稿
     try:
         result = ig_post_now(ig_user_id, url, True, caption, access_token)
     except Exception as e:
@@ -203,342 +554,26 @@ def publish_reel():
 
     return result
 
-# -------- routes --------
-@app.route("/")
-def index():
-    bgs = list_files_sorted(BACKGROUND_DIR)
-    ovs = list_files_sorted(OVERLAY_DIR)
-    outs = list_files_sorted(OUTPUT_DIR)
-
-    # 背景
-    bg_rows = []
-    for name in bgs:
-        src = BACKGROUND_DIR / name
-        th = THUMB_DIR / f"bg__{name}.jpg"
-        try:
-            if not DISABLE_THUMBS:
-                ensure_thumbnail(src, th)
-        except Exception:
-            pass
-        bg_rows.append((name, f"static/thumbs/{th.name}" if th.exists() else ""))
-
-    # 並び順＆テキスト上書き
-    order = _load_json(MATERIALS_ORDER, [])
-    overrides = _load_json(MATERIAL_OVERRIDES, {})
-
-    ov_set = set(ovs)
-    ordered = [f for f in order if f in ov_set] + [f for f in ovs if f not in order]
-
-    ov_rows = []
-    for name in ordered:
-        src = OVERLAY_DIR / name
-        th = THUMB_DIR / f"ov__{name}.jpg"
-        try:
-            if not DISABLE_THUMBS:
-                ensure_thumbnail(src, th)
-        except Exception:
-            pass
-        text_override = overrides.get(name, {}).get("text", "")
-        ov_rows.append({
-            "name": name,
-            "thumb": f"static/thumbs/{th.name}" if th.exists() else "",
-            "text": text_override
-        })
-
-    return render_template("index.html", bg_rows=bg_rows, ov_rows=ov_rows, outs_rows=outs)
-
-@app.route("/upload", methods=["POST"])
-def upload():
-    target = request.args.get("target", "overlay")  # backgrounds | overlay
-    file = request.files.get("file")
-    if not file or not file.filename:
-        return redirect(url_for("index"))
-    if not is_allowed(file.filename):
-        return "Unsupported file type", 400
-
-    fname = secure_filename(file.filename)
-    folder = BACKGROUND_DIR if target == "backgrounds" else OVERLAY_DIR
-    file.save(folder / fname)
+# ---------- 設定バックアップ（任意） ----------
+@app.route("/settings/export", methods=["POST"])
+def settings_export():
     try:
-        prefix = "bg" if target == "backgrounds" else "ov"
-        if not DISABLE_THUMBS:
-            ensure_thumbnail(folder / fname, THUMB_DIR / f"{prefix}__{fname}.jpg")
-    except Exception:
-        pass
-
-    # 新規素材は order の末尾へ
-    if target != "backgrounds":
-        order = _load_json(MATERIALS_ORDER, [])
-        if fname not in order:
-            order.append(fname)
-            _save_json(MATERIALS_ORDER, order)
-
-    return redirect(url_for("index"))
-
-@app.route("/preview/<kind>/<filename>")
-def preview(kind: str, filename: str):
-    if kind not in {"backgrounds", "overlay_input", "output"}:
-        abort(404)
-    folder = {"backgrounds": BACKGROUND_DIR, "overlay_input": OVERLAY_DIR, "output": OUTPUT_DIR}[kind]
-    path = safe_join(folder, filename)
-    if not path.exists():
-        abort(404)
-    return render_template("preview.html",
-                           kind=kind,
-                           filename=filename,
-                           file_url=f"static/{kind}/{filename}",
-                           is_video=is_video(filename))
-
-# 並び順・テキスト保存
-@app.route("/materials/sync", methods=["POST"])
-def materials_sync():
-    data = request.get_json(silent=True) or {}
-    order = data.get("order", [])
-    texts = data.get("texts", {})
-
-    current = {f.name for f in OVERLAY_DIR.iterdir() if f.is_file() and is_allowed(f.name)}
-    cleaned_order = [f for f in order if f in current]
-    cleaned_texts = {k: {"text": (v or "").strip()} for k, v in texts.items() if k in current}
-
-    _save_json(MATERIALS_ORDER, cleaned_order)
-    overrides = _load_json(MATERIAL_OVERRIDES, {})
-    overrides.update(cleaned_texts)
-    _save_json(MATERIAL_OVERRIDES, overrides)
-
-    return {"ok": True, "count": len(cleaned_order)}
-
-# 素材削除
-@app.route("/materials/delete", methods=["POST"])
-def materials_delete():
-    filename = request.form.get("filename", "")
-    path = safe_join(OVERLAY_DIR, filename)
-    if not path.exists():
-        abort(404)
-    try:
-        path.unlink(missing_ok=True)
-        (THUMB_DIR / f"ov__{filename}.jpg").unlink(missing_ok=True)
-    except Exception:
-        pass
-
-    order = _load_json(MATERIALS_ORDER, [])
-    order = [f for f in order if f != filename]
-    _save_json(MATERIALS_ORDER, order)
-
-    overrides = _load_json(MATERIAL_OVERRIDES, {})
-    overrides.pop(filename, None)
-    _save_json(MATERIAL_OVERRIDES, overrides)
-
-    return redirect(url_for("index"))
-
-@app.route("/combine", methods=["POST"])
-def combine():
-    bg = request.form.get("background")
-    ov = request.form.get("overlay")
-    pos = request.form.get("pos", "top-right")
-    size_pct = float(request.form.get("size_pct", "50"))
-    duration_mode = request.form.get("duration_mode", "shortest")
-    fadein = float(request.form.get("fadein", "0"))
-
-    text_enable = request.get_json(silent=True) is None and (request.form.get("text_enable") == "on")
-    text_mode = request.form.get("text_mode", "custom")
-    text_input = request.form.get("text_input", "")
-    text_size = int(request.form.get("text_size", "64"))
-    text_pos = request.form.get("text_pos", "top-left")
-
-    if not bg or not ov:
-        return "background and overlay are required", 400
-
-    bg_path = safe_join(BACKGROUND_DIR, bg)
-    ov_path = safe_join(OVERLAY_DIR, ov)
-    if not bg_path.exists() or not ov_path.exists():
-        abort(404)
-
-    ts = int(time.time())
-    out_name = f"{Path(bg).stem}__{Path(ov).stem}__{ts}.mp4"
-    out_path = OUTPUT_DIR / out_name
-
-    try:
-        with VideoFileClip(str(bg_path)) as bg_clip:
-            bg_w, bg_h = bg_clip.w, bg_clip.h
-            base_len = min(bg_w, bg_h)
-            overlay_target = max(1, int(base_len * (size_pct / 100.0)))
-
-            def pos_xy(overlay_w, overlay_h):
-                m = 12
-                mapping = {
-                    "top-left": (m, m),
-                    "top-right": (bg_w - overlay_w - m, m),
-                    "bottom-left": (m, bg_h - overlay_h - m),
-                    "bottom-right": (bg_w - overlay_w - m, bg_h - overlay_h - m),
-                    "center": ((bg_w - overlay_w)//2, (bg_h - overlay_h)//2),
-                }
-                return mapping.get(pos, mapping["top-right"])
-
-            overrides = _load_json(MATERIAL_OVERRIDES, {})
-            override_text = overrides.get(ov_path.name, {}).get("text", "").strip()
-            candidate = (text_input or "").strip() or override_text
-
-            if ov_path.suffix.lower() in VIDEO_EXTS:
-                with VideoFileClip(str(ov_path)) as ov_clip:
-                    overlay = ov_clip.resize(height=overlay_target) if ov_clip.w <= ov_clip.h else ov_clip.resize(width=overlay_target)
-                    if fadein > 0:
-                        overlay = overlay.fx(vfx.fadein, fadein)
-                    ox, oy = pos_xy(overlay.w, overlay.h)
-                    overlay = overlay.set_position((ox, oy))
-
-                    if duration_mode == "background":
-                        final_dur = bg_clip.duration
-                    else:
-                        final_dur = min(bg_clip.duration, overlay.duration)
-
-                    clips = [bg_clip.set_duration(final_dur), overlay.set_duration(final_dur)]
-
-                    if text_enable:
-                        if text_mode == "custom" and candidate:
-                            line = candidate
-                        else:
-                            lines = [s.strip() for s in RANDOM_TXT.read_text(encoding="utf-8").splitlines() if s.strip()]
-                            line = lines[int(time.time()) % len(lines)] if lines else ""
-                        if line:
-                            img = render_text_image(line, font_size=text_size)
-                            txt_clip = ImageClip(np.array(img)).set_duration(final_dur)
-                            tx, ty = calc_position(text_pos, bg_w, bg_h, txt_clip.w, txt_clip.h)
-                            txt_clip = txt_clip.set_position((tx, ty))
-                            clips.append(txt_clip)
-
-                    final = CompositeVideoClip(clips)
-                    final.write_videofile(
-                        str(out_path),
-                        codec="libx264", audio_codec="aac",
-                        threads=2,
-                        fps=bg_clip.fps if bg_clip.fps else 30,
-                        preset="medium"
-                    )
-                    final.close()
-            else:
-                img_clip = ImageClip(str(ov_path))
-                overlay = img_clip.resize(height=overlay_target) if img_clip.w <= img_clip.h else img_clip.resize(width=overlay_target)
-                if fadein > 0:
-                    overlay = overlay.fx(vfx.fadein, fadein)
-                ox, oy = pos_xy(overlay.w, overlay.h)
-
-                if duration_mode == "background":
-                    final_dur = bg_clip.duration
-                else:
-                    final_dur = min(bg_clip.duration, 15.0)
-
-                overlay = overlay.set_duration(final_dur).set_position((ox, oy))
-                clips = [bg_clip.set_duration(final_dur), overlay]
-
-                if text_enable:
-                    if text_mode == "custom" and candidate:
-                        line = candidate
-                    else:
-                        lines = [s.strip() for s in RANDOM_TXT.read_text(encoding="utf-8").splitlines() if s.strip()]
-                        line = lines[int(time.time()) % len(lines)] if lines else ""
-                    if line:
-                        img = render_text_image(line, font_size=text_size)
-                        txt_clip = ImageClip(np.array(img)).set_duration(final_dur)
-                        tx, ty = calc_position(text_pos, bg_w, bg_h, txt_clip.w, txt_clip.h)
-                        txt_clip = txt_clip.set_position((tx, ty))
-                        clips.append(txt_clip)
-
-                final = CompositeVideoClip(clips)
-                final.write_videofile(
-                    str(out_path),
-                    codec="libx264", audio_codec="aac",
-                    threads=2,
-                    fps=bg_clip.fps if bg_clip.fps else 30,
-                    preset="medium"
-                )
-                final.close()
-
+        res = cloud_backup()
+        return {"ok": True, "result": res}
     except Exception as e:
-        return f"Error during combine: {e}", 500
+        return {"ok": False, "error": str(e)}, 500
 
-    return redirect(url_for("preview", kind="output", filename=out_name))
+@app.route("/settings/import", methods=["POST"])
+def settings_import():
+    try:
+        cloud_restore()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
 
-@app.route("/download/output/<filename>")
-def download_output(filename: str):
-    path = safe_join(OUTPUT_DIR, filename)
-    if not path.exists():
-        abort(404)
-    return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
-
-@app.route("/static/<path:subpath>")
-def static_passthrough(subpath: str):
-    full = STATIC_DIR / subpath
-    if not full.exists():
-        abort(404)
-    return send_from_directory(STATIC_DIR, subpath)
-
-# ---- Accounts (UI保存のみ) ----
-def _load_accounts():
-    if ACCOUNTS_JSON.exists():
-        try:
-            return json.loads(ACCOUNTS_JSON.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {"accounts": []}
-
-def _save_accounts(obj):
-    ACCOUNTS_JSON.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-
-@app.route("/accounts", methods=["GET"])
-def accounts_list():
-    return _load_accounts()
-
-@app.route("/accounts/upsert", methods=["POST"])
-def accounts_upsert():
-    data = request.get_json(silent=True) or {}
-    no = str(data.get("no", "")).strip()
-    if not no:
-        return {"ok": False, "error": "no required"}, 400
-    accs = _load_accounts()
-    found = False
-    for a in accs["accounts"]:
-        if str(a.get("no", "")) == no:
-            a.update({
-                "no": no,
-                "label": data.get("label", ""),
-                "ig_user_id": data.get("ig_user_id", ""),
-                "page_id": data.get("page_id", ""),
-                "access_token": data.get("access_token", a.get("access_token", "")),
-            })
-            found = True
-            break
-    if not found:
-        accs["accounts"].append({
-            "no": no,
-            "label": data.get("label", ""),
-            "ig_user_id": data.get("ig_user_id", ""),
-            "page_id": data.get("page_id", ""),
-            "access_token": data.get("access_token", ""),
-        })
-    _save_accounts(accs)
-    return {"ok": True}
-
-
-@app.route("/accounts/delete", methods=["POST"])
-def accounts_delete():
-    data = request.get_json(silent=True) or {}
-    no = str(data.get("no", "")).strip()
-    if not no:
-        return {"ok": False, "error": "no required"}, 400
-    accs = _load_accounts()
-    accs["accounts"] = [a for a in accs["accounts"] if str(a.get("no", "")) != no]
-    _save_accounts(accs)
-    return {"ok": True}
-
-@app.route("/random_texts", methods=["GET", "POST"])
-def random_texts():
-    if request.method == "POST":
-        txt = request.form.get("content", "")
-        RANDOM_TXT.write_text(txt, encoding="utf-8")
-        return redirect(url_for("random_texts"))
-    content = RANDOM_TXT.read_text(encoding="utf-8") if RANDOM_TXT.exists() else ""
-    return render_template("random_texts.html", content=content)
-
+# =======================================
+# 起動
+# =======================================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
-
+    # ローカルデバッグ用
+    app.run(host="0.0.0.0", port=8000, debug=True)
