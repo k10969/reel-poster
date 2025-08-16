@@ -2,6 +2,8 @@
 import os
 import random
 import logging
+from flask import Flask
+app = Flask(__name__)
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -226,3 +228,13 @@ class PosterCoreReel:
             preset="medium",
             threads=4
         )
+# --- WSGI export guard (minimal) ---
+try:
+    app  # 既に app が定義されているなら何もしない
+except NameError:
+    try:
+        # application という名前で持っている場合
+        app = application
+    except NameError:
+        # create_app() ファクトリを使っている場合
+        app = create_app()
