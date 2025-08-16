@@ -1,261 +1,412 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <title>投稿</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="https://unpkg.com/modern-css-reset/dist/reset.min.css">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "ヒラギノ角ゴ ProN", "Hiragino Kaku Gothic ProN", "メイリオ", Meiryo, sans-serif; padding: 16px; }
-    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-    .btn { background:#198754; color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; }
-    .btn.sub { background:#0d6efd; }
-    .btn.warn { background:#dc3545; }
-    .btn.gray { background:#6c757d; }
-    select, input[type="text"], input[type="number"] { padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
-    .switch { display:inline-flex; align-items:center; gap:6px; }
-    .panel { border:1px solid #ddd; border-radius:10px; padding:14px; margin-top:10px; }
-    .header { font-weight:700; font-size:18px; margin-bottom:8px; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { border-bottom:1px solid #eee; padding:10px; vertical-align:top; }
-    th { color:#333; }
-    .thumb { width:120px; height:120px; object-fit:cover; border:1px solid #ddd; border-radius:6px; cursor:zoom-in; }
-    .empty { color:#888; padding:8px 0; }
-    .col-thumb { width:140px; }
-    .col-filename { width:240px; color:#666; }
-    .col-text { min-width:260px; }
-    .row { cursor:grab; }
-    .progress { height:8px; background:#f2f2f2; border-radius:6px; overflow:hidden; }
-    .bar { height:100%; width:0%; background:#0d6efd; transition:width .2s; }
-    .right { margin-left:auto; }
-    .check { transform:scale(1.2); }
-    .muted { color:#6c757d; font-size:12px; }
-  </style>
-  <!-- SortableJS for D&D 並び替え -->
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>投稿ツール</title>
+<style>
+  :root{--bd:#e5e7eb;--mut:#6b7280;--ok:#10b981;--err:#ef4444}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;margin:16px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .tab{padding:8px 12px;border:1px solid var(--bd);border-radius:8px;background:#fff;cursor:pointer}
+  .tab.active{background:#111827;color:#fff;border-color:#111827}
+  .section{display:none}
+  .section.active{display:block}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .btn{height:34px;padding:0 12px;border:1px solid var(--bd);background:#fff;border-radius:6px;cursor:pointer}
+  .btn.primary{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .btn.danger{background:#fff;color:#b91c1c;border-color:#ef4444}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .sel, .txt{height:34px;border:1px solid var(--bd);border-radius:6px;padding:0 8px}
+  .txt{height:auto;min-height:34px}
+  .card{border:1px solid var(--bd);border-radius:10px;padding:10px;background:#fff}
+  table{width:100%;border-collapse:collapse}
+  th,td{border-bottom:1px solid var(--bd);padding:10px;vertical-align:top}
+  th{background:#f9fafb;text-align:left;font-weight:600}
+  tbody tr.sel{background:#eff6ff}
+  img.thumb{width:140px;height:140px;object-fit:cover;border:1px solid var(--bd);border-radius:6px;display:block}
+  .muted{color:var(--mut);font-size:12px}
+  textarea{width:100%;min-height:70px;border:1px solid var(--bd);border-radius:8px;padding:8px;resize:vertical}
+  .progress{height:10px;background:#f3f4f6;border-radius:999px;overflow:hidden}
+  .bar{height:100%;width:0;background:var(--ok);transition:width .2s}
+  .grid{display:grid;gap:10px}
+  @media(min-width:960px){.grid.cols-2{grid-template-columns:1fr 1fr}}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+  .pill{display:inline-block;border:1px solid var(--bd);padding:2px 8px;border-radius:999px;background:#f9fafb}
+  .hint{font-size:12px;color:#6b7280;margin-top:4px}
+  .danger-text{color:#b91c1c}
+</style>
 </head>
 <body>
-  <!-- 上部ツールバー -->
-  <div class="toolbar">
-    <strong>投稿</strong>
-    <label>番号
-      <input id="accountNo" type="number" value="1" min="1" style="width:80px">
-    </label>
-    <select id="accountSelect"></select>
-    <button id="tokenRefresh" class="btn sub">トークン更新</button>
-    <button id="tokenCheck" class="btn sub">トークン有効期限チェック</button>
-    <button id="tokenRevoke" class="btn warn">削除</button>
 
-    <label class="switch">
-      <input id="allAccounts" type="checkbox">
-      <span>全アカウント（分散投稿）</span>
-    </label>
+<!-- タブ -->
+<div class="tabs">
+  <button class="tab active" data-target="#tab-post">投稿</button>
+  <button class="tab" data-target="#tab-random">ランダムテキスト</button>
+  <button class="tab" data-target="#tab-accounts">アカウント管理</button>
+  <button class="tab" data-target="#tab-tokens">トークン管理</button>
+  <button class="tab" data-target="#tab-logs">投稿ログ</button>
+</div>
 
-    <button id="reload" class="btn gray">更新</button>
-    <button id="doPost" class="btn right btn">投稿実行</button>
+<!-- 投稿タブ -->
+<section id="tab-post" class="section active">
+  <div class="row">
+    <strong>アカウント選択</strong>
+    <select id="account" class="sel" style="min-width:300px" disabled><option>読み込み中…</option></select>
+    <button id="refresh" class="btn">更新</button>
+    <button id="post" class="btn primary">投稿実行</button>
   </div>
 
-  <!-- 素材一覧 -->
-  <div class="panel">
-    <div class="header">overlay_input の素材一覧（外部D&D移動、右列ダブルクリックでテキスト編集、サムネダブルクリックで拡大）</div>
-
-    <div style="display:flex; gap:8px; margin-bottom:10px;">
-      <label class="btn gray">
-        + 素材追加…（iPhone）
-        <input id="fileInput" type="file" accept="image/*,video/*" multiple style="display:none">
-      </label>
-      <button id="removeSelected" class="btn warn">素材削除</button>
-    </div>
-
-    <table>
+  <div class="card" style="margin-bottom:10px">
+    <div class="muted">overlay_input の素材一覧（チェックが「選択投稿」／未選択＝全部投稿）</div>
+    <table id="tbl">
       <thead>
         <tr>
-          <th style="width:32px;"></th>
-          <th class="col-thumb">サムネ</th>
-          <th class="col-filename">ファイル名</th>
-          <th class="col-text">テキスト（空ならランダム）</th>
+          <th style="width:170px">サムネ</th>
+          <th>ファイル名</th>
+          <th style="width:40%">テキスト（空なら random_texts.txt）</th>
         </tr>
       </thead>
-      <tbody id="materialsBody">
-        <tr id="emptyRow"><td colspan="4" class="empty">素材がありません。上の「+素材追加…」からアップロードしてください。</td></tr>
-      </tbody>
+      <tbody></tbody>
     </table>
-
-    <div style="margin-top:12px;">
-      <div class="progress"><div id="progBar" class="bar"></div></div>
-      <div class="muted">進捗</div>
-    </div>
   </div>
 
-  <script>
-    // ---- 状態 ----
-    let accounts = [];
-    let materials = [];   // [{name, url, text, selected}]
-    const bodyEl = document.getElementById('materialsBody');
-    const emptyEl = document.getElementById('emptyRow');
-    const accountSel = document.getElementById('accountSelect');
-    const accountNoEl = document.getElementById('accountNo');
+  <div class="card">
+    <div class="row">
+      <div class="muted" id="status">待機中</div>
+    </div>
+    <div class="progress" style="margin-top:8px"><div class="bar" id="bar"></div></div>
+    <div id="results" style="margin-top:10px;font-size:14px"></div>
+  </div>
+</section>
 
-    // ---- 初期化 ----
-    init();
+<!-- ランダムテキスト -->
+<section id="tab-random" class="section">
+  <div class="grid cols-2">
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">random_texts.txt（1行=1候補）</div>
+      <textarea id="randomTexts" placeholder="例：\nフォローしてね\n続きはストーリーで\n…"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="saveRandom" class="btn primary">保存</button>
+        <span id="randomSaveMsg" class="muted"></span>
+      </div>
+      <div class="hint">保存すると即座にサーバーへ反映され、次回の「空欄」キャプションに使われます。</div>
+    </div>
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">現在の行数</div>
+      <div id="randomCount" class="pill">-- 行</div>
+    </div>
+  </div>
+</section>
 
-    async function init() {
-      await loadAccounts();
-      await loadMaterials();
-      wireToolbar();
-      makeSortable();
-    }
+<!-- アカウント管理 -->
+<section id="tab-accounts" class="section">
+  <div class="grid cols-2">
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">アカウント一覧</div>
+      <table id="acctTable">
+        <thead><tr><th>#</th><th>ラベル</th><th>背景（例: background1.mp4）</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">アカウント追加</div>
+      <div class="grid">
+        <input id="acctNo" class="txt" type="number" placeholder="アカウント番号（例: 1）">
+        <input id="acctLabel" class="txt" placeholder="ラベル（任意）">
+        <input id="acctBg" class="txt" placeholder="背景ファイル名（例: background1.mp4）">
+        <button id="acctAddBtn" class="btn primary">追加</button>
+        <div class="hint">保存先は settings_store（accounts.json）。</div>
+        <div id="acctMsg" class="muted"></div>
+      </div>
+    </div>
+  </div>
+</section>
 
-    async function loadAccounts() {
-      const r = await fetch('/api/accounts');
-      accounts = await r.json();
-      accountSel.innerHTML = '';
-      accounts.forEach((a, idx) => {
+<!-- トークン管理 -->
+<section id="tab-tokens" class="section">
+  <div class="grid cols-2">
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">トークン一覧</div>
+      <table id="tokTable">
+        <thead><tr><th>#</th><th>page_id</th><th>ig_user_id</th><th>token(先頭のみ)</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">トークン追加</div>
+      <div class="grid">
+        <input id="tokAcctNo" class="txt" type="number" placeholder="アカウント番号（例: 1）">
+        <input id="tokPage" class="txt" placeholder="page_id">
+        <input id="tokIg" class="txt" placeholder="ig_user_id">
+        <textarea id="tokAccess" class="txt" placeholder="長期アクセストークン"></textarea>
+        <button id="tokAddBtn" class="btn primary">追加</button>
+        <div class="hint">保存先は settings_store（tokens.json など）。</div>
+        <div id="tokMsg" class="muted"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 投稿ログ（サーバ側で保存していれば表示）-->
+<section id="tab-logs" class="section">
+  <div class="card">
+    <div class="row">
+      <button id="logReload" class="btn">再読込</button>
+      <span class="muted">最近の投稿ログ</span>
+    </div>
+    <pre id="logs" class="card mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;margin-top:8px"></pre>
+  </div>
+</section>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+/* タブ切替 */
+$$('.tab').forEach(t=>{
+  t.addEventListener('click', ()=>{
+    $$('.tab').forEach(x=>x.classList.remove('active'));
+    $$('.section').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const trg = t.dataset.target;
+    if (trg) document.querySelector(trg).classList.add('active');
+  });
+});
+
+const elAcc   = $('#account');
+const elTbl   = $('#tbl tbody');
+const elPost  = $('#post');
+const elRef   = $('#refresh');
+const elStat  = $('#status');
+const elBar   = $('#bar');
+const elRes   = $('#results');
+
+let accounts = [];
+let materials = [];
+let overrides = {};
+let selected = new Set();
+
+/* 起動 */
+init();
+async function init(){
+  await Promise.all([loadAccounts(), loadMaterials(), loadRandomTexts(), loadTokens()]);
+  renderMaterials();
+  renderAccounts();
+  renderTokens();
+}
+
+/* 投稿タブ：読み込み */
+async function loadAccounts(){
+  try{
+    const r = await fetch('/api/accounts');
+    const data = await r.json();
+    accounts = Array.isArray(data)? data: [];
+    elAcc.innerHTML = '';
+    if (accounts.length===0){ elAcc.innerHTML = '<option value="">accounts.jsonが読めません</option>'; elAcc.disabled = true; }
+    else{
+      for(const a of accounts){
         const opt = document.createElement('option');
-        opt.value = String(idx+1);
-        opt.textContent = `${idx+1}. ${a.label} (IG:${a.ig_user_id} / Page:${a.page_id})`;
-        accountSel.appendChild(opt);
-      });
-      // 番号 → セレクト連動
-      const n = Number(accountNoEl.value||1);
-      if (n>=1 && n<=accounts.length) accountSel.value = String(n);
-      accountNoEl.addEventListener('change', ()=>accountSel.value = String(Number(accountNoEl.value||1)));
-      accountSel.addEventListener('change', ()=>accountNoEl.value = String(Number(accountSel.value||1)));
-    }
-
-    async function loadMaterials() {
-      const r = await fetch('/api/materials');
-      materials = await r.json(); // [{name,url,text}]
-      materials.forEach(m => m.selected = false);
-      renderRows();
-    }
-
-    function renderRows() {
-      bodyEl.innerHTML = '';
-      if (!materials.length) {
-        bodyEl.appendChild(emptyEl);
-        emptyEl.style.display='table-row';
-        return;
+        opt.value = a.account_no;
+        opt.textContent = a.label || `${a.account_no}`;
+        elAcc.appendChild(opt);
       }
-      emptyEl.style.display='none';
-      materials.forEach((m, idx) => {
-        const tr = document.createElement('tr');
-        tr.className = 'row';
-        tr.dataset.name = m.name;
-
-        // check
-        const td0 = document.createElement('td');
-        const ck = document.createElement('input');
-        ck.type='checkbox'; ck.className='check';
-        ck.checked = !!m.selected;
-        ck.addEventListener('change', ()=>m.selected = ck.checked);
-        td0.appendChild(ck);
-
-        // thumb
-        const td1 = document.createElement('td');
-        const img = document.createElement('img');
-        img.src = m.url; img.className = 'thumb';
-        img.ondblclick = ()=>window.open(m.url, '_blank');
-        td1.appendChild(img);
-
-        // filename（表示だけ）
-        const td2 = document.createElement('td');
-        td2.textContent = m.name;
-
-        // text
-        const td3 = document.createElement('td');
-        const inp = document.createElement('input');
-        inp.type='text'; inp.value = m.text||''; inp.style.width='100%';
-        inp.placeholder='空ならランダム';
-        inp.addEventListener('change', async()=>{
-          m.text = inp.value;
-          await fetch('/api/update_text', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ name: m.name, text: m.text })
-          });
-        });
-        // 右列ダブルクリックでも編集開始
-        td3.ondblclick = ()=>{ inp.focus(); inp.select(); };
-        td3.appendChild(inp);
-
-        tr.append(td0, td1, td2, td3);
-        bodyEl.appendChild(tr);
-      });
+      elAcc.disabled = false;
     }
+  }catch(e){
+    elAcc.innerHTML = '<option value="">/api/accounts エラー</option>';
+    elAcc.disabled = true;
+  }
+}
+async function loadMaterials(){
+  try{
+    const r = await fetch('/api/materials');
+    const data = await r.json();
+    materials = Array.isArray(data)? data: [];
+  }catch(e){ materials = []; }
+}
+function renderMaterials(){
+  elTbl.innerHTML = '';
+  for(const m of materials){
+    const tr = document.createElement('tr');
 
-    function makeSortable() {
-      new Sortable(bodyEl, {
-        animation: 150,
-        handle: '.row',
-        onEnd: async () => {
-          const order = [...bodyEl.querySelectorAll('tr.row')].map(tr=>tr.dataset.name);
-          await fetch('/api/update_order', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ order })
-          });
-        }
-      });
-    }
+    const td0 = document.createElement('td');
+    td0.innerHTML = `
+      <label style="display:flex;gap:8px;align-items:center">
+        <input type="checkbox" data-name="${m.name}">
+        <img class="thumb" src="/overlay_input/${m.name}" alt="">
+      </label>`;
+    tr.appendChild(td0);
 
-    function wireToolbar() {
-      document.getElementById('fileInput').addEventListener('change', async (e) => {
-        const files = e.target.files;
-        if (!files || !files.length) return;
-        const fd = new FormData();
-        for (const f of files) fd.append('files', f);
-        const r = await fetch('/api/upload', { method:'POST', body: fd });
-        if (!r.ok) { alert('アップロード失敗'); return; }
-        await loadMaterials();
-        e.target.value='';
-      });
+    const td1 = document.createElement('td');
+    td1.innerHTML = `<div style="display:flex;align-items:center;height:140px">${m.name}</div>`;
+    tr.appendChild(td1);
 
-      document.getElementById('removeSelected').addEventListener('click', async ()=>{
-        const names = materials.filter(m=>m.selected).map(m=>m.name);
-        if (!names.length) { alert('削除する素材をチェックしてください'); return; }
-        if (!confirm(`${names.length}件を削除しますか？`)) return;
-        const r = await fetch('/api/remove', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ names })
-        });
-        if (!r.ok) { alert('削除に失敗'); return; }
-        await loadMaterials();
-      });
+    const td2 = document.createElement('td');
+    td2.innerHTML = `<textarea placeholder="空欄＝random_texts.txtから自動" data-name="${m.name}"></textarea>`;
+    tr.appendChild(td2);
 
-      document.getElementById('reload').addEventListener('click', async ()=>{
-        await loadMaterials();
-      });
+    elTbl.appendChild(tr);
+  }
+  elTbl.querySelectorAll('input[type=checkbox]').forEach(chk=>{
+    chk.addEventListener('change', e=>{
+      const n = e.target.dataset.name;
+      if(e.target.checked){ selected.add(n); chk.closest('tr').classList.add('sel'); }
+      else { selected.delete(n); chk.closest('tr').classList.remove('sel'); }
+    });
+  });
+  elTbl.querySelectorAll('textarea').forEach(t=>{
+    t.addEventListener('input', e=>{
+      overrides[e.target.dataset.name] = e.target.value;
+    });
+  });
+}
+elRef.addEventListener('click', async ()=>{
+  elStat.textContent = '再読込中…';
+  await loadMaterials(); renderMaterials();
+  elStat.textContent = '待機中';
+});
+elPost.addEventListener('click', async ()=>{
+  const accountNo = parseInt(elAcc.value || '1', 10);
+  const filenames = Array.from(selected); // 未選択→サーバ側で全部投稿
+  elPost.disabled = true; elRef.disabled = true;
+  elStat.textContent = '投稿中…'; elBar.style.width = '15%'; elRes.textContent = '';
+  try{
+    const res = await fetch('/api/post', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ account_no: accountNo, filenames, overrides })
+    });
+    const json = await res.json();
+    if(!res.ok || !json.ok) throw new Error(json.error || '投稿API失敗');
+    const rows = json.results || [];
+    let ok = 0;
+    rows.forEach((r,i)=>{
+      const d = document.createElement('div');
+      if(r.ok){ ok++; d.textContent = `✅ ${r.name} → media_id: ${r.media_id}`; }
+      else { d.textContent = `❌ ${r.name} → ${r.error||'失敗'}`; d.classList.add('danger-text'); }
+      elRes.appendChild(d);
+      elBar.style.width = `${Math.min(15 + ((i+1)/Math.max(rows.length,1))*85, 100)}%`;
+    });
+    elStat.textContent = `完了：成功 ${ok} / ${rows.length}`;
+  }catch(err){
+    elStat.textContent = `失敗: ${err.message}`;
+    elBar.style.width = '0%';
+  }finally{
+    elPost.disabled = false; elRef.disabled = false;
+  }
+});
 
-      document.getElementById('doPost').addEventListener('click', async ()=>{
-        const account_no = Number(accountNoEl.value||1);
-        const all = document.getElementById('allAccounts').checked;
-        const selected = materials.filter(m=>m.selected).map(m=>m.name);
-        const body = { account_no, all_accounts: all, selected_names: selected };
-        setBar(5);
-        const r = await fetch('/api/post', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(body)
-        });
-        const txt = await r.text();
-        if (r.headers.get('content-type')?.includes('application/json')) {
-          const data = JSON.parse(txt);
-          alert(data.message || '完了');
-        } else {
-          // 何かの例外をそのまま返してる場合
-          alert(txt);
-        }
-        setBar(100);
-        setTimeout(()=>setBar(0), 800);
-      });
+/* ランダムテキスト */
+async function loadRandomTexts(){
+  try{
+    const r = await fetch('/api/random_texts');
+    const j = await r.json();
+    $('#randomTexts').value = (j && j.text)||'';
+    $('#randomCount').textContent = ((j && j.count)||0) + ' 行';
+  }catch(e){
+    $('#randomTexts').value = '';
+    $('#randomCount').textContent = '0 行';
+  }
+}
+$('#saveRandom').addEventListener('click', async ()=>{
+  const txt = $('#randomTexts').value||'';
+  const r = await fetch('/api/random_texts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
+  const j = await r.json().catch(()=>({ok:false}));
+  if(j.ok){ $('#randomSaveMsg').textContent = '保存しました'; $('#randomCount').textContent = (j.count||0)+' 行'; }
+  else { $('#randomSaveMsg').textContent = '保存失敗'; }
+  setTimeout(()=>$('#randomSaveMsg').textContent='',1500);
+});
 
-      // 飾りボタン（ルーティンは既存のAPIに繋ぐなら差替）
-      document.getElementById('tokenRefresh').onclick = ()=>window.location.href='/tokens/refresh';
-      document.getElementById('tokenCheck').onclick = ()=>window.location.href='/tokens/status';
-      document.getElementById('tokenRevoke').onclick = ()=>window.location.href='/tokens/revoke';
-    }
+/* アカウント管理 */
+function renderAccounts(){
+  const tb = $('#acctTable tbody'); tb.innerHTML = '';
+  for(const a of accounts){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${a.account_no}</td>
+      <td>${a.label||''}</td>
+      <td>${a.background||''}</td>
+      <td><button class="btn danger" data-del-acct="${a.account_no}">削除</button></td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll('[data-del-acct]').forEach(b=>{
+    b.addEventListener('click', async ()=>{
+      const no = parseInt(b.dataset.delAcct,10);
+      if(!confirm(`アカウント #${no} を削除しますか？`)) return;
+      const r = await fetch('/api/accounts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no:no})});
+      const j = await r.json().catch(()=>({ok:false}));
+      if(j.ok){ await loadAccounts(); renderAccounts(); }
+      else alert('削除に失敗しました');
+    });
+  });
+}
+$('#acctAddBtn').addEventListener('click', async ()=>{
+  const no = parseInt($('#acctNo').value||'0',10);
+  const label = $('#acctLabel').value||'';
+  const bg = $('#acctBg').value||'';
+  if(!no){ $('#acctMsg').textContent='番号は必須です'; return; }
+  const r = await fetch('/api/accounts/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no:no,label,background:bg})});
+  const j = await r.json().catch(()=>({ok:false}));
+  if(j.ok){ $('#acctMsg').textContent='追加しました'; $('#acctNo').value=''; $('#acctLabel').value=''; $('#acctBg').value=''; await loadAccounts(); renderAccounts(); }
+  else $('#acctMsg').textContent='追加失敗';
+  setTimeout(()=>$('#acctMsg').textContent='',1500);
+});
 
-    function setBar(p){ document.getElementById('progBar').style.width = `${p}%`; }
-  </script>
+/* トークン管理 */
+let tokens = [];
+async function loadTokens(){
+  try{
+    const r = await fetch('/api/tokens');
+    const j = await r.json();
+    tokens = Array.isArray(j)? j: (j.tokens||[]);
+  }catch(e){ tokens = []; }
+}
+function renderTokens(){
+  const tb = $('#tokTable tbody'); tb.innerHTML = '';
+  for(const t of tokens){
+    const head = (t.access_token||'').slice(0,8);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${t.account_no??''}</td>
+      <td>${t.page_id??''}</td>
+      <td>${t.ig_user_id??''}</td>
+      <td><span class="pill mono">${head}…</span></td>
+      <td><button class="btn danger" data-del-tok="${t.account_no}">削除</button></td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll('[data-del-tok]').forEach(b=>{
+    b.addEventListener('click', async ()=>{
+      const no = parseInt(b.dataset.delTok,10);
+      if(!confirm(`アカウント #${no} のトークンを削除しますか？`)) return;
+      const r = await fetch('/api/tokens/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no:no})});
+      const j = await r.json().catch(()=>({ok:false}));
+      if(j.ok){ await loadTokens(); renderTokens(); } else alert('削除に失敗しました');
+    });
+  });
+}
+$('#tokAddBtn').addEventListener('click', async ()=>{
+  const account_no = parseInt($('#tokAcctNo').value||'0',10);
+  const page_id = $('#tokPage').value||'';
+  const ig_user_id = $('#tokIg').value||'';
+  const access_token = $('#tokAccess').value||'';
+  if(!account_no || !page_id || !ig_user_id || !access_token){ $('#tokMsg').textContent='全て必須です'; return; }
+  const r = await fetch('/api/tokens/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_no,page_id,ig_user_id,access_token})});
+  const j = await r.json().catch(()=>({ok:false}));
+  if(j.ok){ $('#tokMsg').textContent='追加しました'; $('#tokAcctNo').value=''; $('#tokPage').value=''; $('#tokIg').value=''; $('#tokAccess').value=''; await loadTokens(); renderTokens(); }
+  else $('#tokMsg').textContent='追加失敗';
+  setTimeout(()=>$('#tokMsg').textContent='',1500);
+});
+
+/* 投稿ログ（任意実装：/api/logs があれば） */
+$('#logReload').addEventListener('click', async ()=>{
+  try{
+    const r = await fetch('/api/logs');
+    const t = await r.text();
+    $('#logs').textContent = t || '(ログなし)';
+  }catch(e){ $('#logs').textContent = '(取得エラー)'; }
+});
+</script>
 </body>
 </html>
