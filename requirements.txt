@@ -1,10 +1,8 @@
-flask==3.1.1
-moviepy==1.0.3
-Pillow==9.5.0
-gunicorn==20.1.0
-imageio==2.31.1
-imageio-ffmpeg==0.4.8
-numpy==1.26.4
-python-dotenv==1.0.1
-requests==2.32.3
-cloudinary==1.36.0
+pillow
+imageio
+moviepy
+cloudinary
+requests
+python-dotenv
+streamlit
+python-magic  # Keep if you're using it for file type detection; otherwise remove
