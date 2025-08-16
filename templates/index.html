@@ -30,6 +30,10 @@
     .divider { height: 1px; background: #eee; margin: 16px 0; }
     select, input[type="checkbox"] { padding: 6px; }
     label { font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #eee; padding: 8px; text-align: left; }
+    th { background: #fafafa; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 6px; }
   </style>
 </head>
 <body>
@@ -43,6 +47,7 @@
     <div class="tab active" data-tab="post">投稿</div>
     <div class="tab" data-tab="random">ランダムテキスト</div>
     <div class="tab" data-tab="logs">投稿ログ</div>
+    <div class="tab" data-tab="accounts">アカウント</div>
   </div>
 
   <div class="tabpanes">
@@ -77,7 +82,6 @@
               <div class="card" data-filename="{{ m.filename }}">
                 <img class="thumb" src="{{ m.thumb_url }}" alt="">
                 <div>
-                  <!-- 右側コメント（素材と1:1）-->
                   <textarea class="comment" placeholder="コメント（空ならランダム使用）">{{ m.comment }}</textarea>
                   <div class="controls" style="margin-top:8px;">
                     <button class="btn primary btn-post-one">この素材を投稿</button>
@@ -125,16 +129,68 @@
       </div>
       <pre id="log-view" class="log">読み込み中...</pre>
     </section>
+
+    <!-- アカウント -->
+    <section id="pane-accounts">
+      <div class="controls" style="margin-bottom:8px;">
+        <button id="btn-add-account" class="btn primary">アカウントを追加</button>
+        <span class="muted">番号=背景ファイル（例: backgrounds/1.mp4）と対応</span>
+      </div>
+      <table id="accounts-table">
+        <thead>
+          <tr>
+            <th style="width:80px;">No</th>
+            <th style="width:160px;">Label</th>
+            <th>IG User ID</th>
+            <th>Page ID</th>
+            <th>Access Token</th>
+            <th style="width:120px;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="accounts-tbody">
+          {% for a in accounts %}
+          <tr data-no="{{ a.no }}">
+            <td><input type="text" class="acc-no" value="{{ a.no }}"></td>
+            <td><input type="text" class="acc-label" value="{{ a.label }}"></td>
+            <td><input type="text" class="acc-ig" value="{{ a.ig_user_id }}"></td>
+            <td><input type="text" class="acc-page" value="{{ a.page_id }}"></td>
+            <td><input type="text" class="acc-token" value="{{ a.access_token }}"></td>
+            <td>
+              <button class="btn btn-save-acc">保存</button>
+              <button class="btn btn-del-acc">削除</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
   </div>
 </div>
 
 <script>
-  // --- タブ切替 ---
+  // ========= helper: safe fetch JSON =========
+  async function fetchJSON(url, options) {
+    const res = await fetch(url, options || {});
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct.includes('application/json')) {
+      const js = await res.json();
+      if (!res.ok) throw new Error(js.error || res.statusText);
+      return js;
+    } else {
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || res.statusText);
+      // JSONじゃないけどOKのときは包んで返す
+      return { ok: true, text };
+    }
+  }
+
+  // ========= タブ =========
   const tabs = document.querySelectorAll('.tab');
   const panes = {
     post: document.getElementById('pane-post'),
     random: document.getElementById('pane-random'),
     logs: document.getElementById('pane-logs'),
+    accounts: document.getElementById('pane-accounts'),
   };
   tabs.forEach(t => {
     t.addEventListener('click', () => {
@@ -143,28 +199,31 @@
       Object.values(panes).forEach(p => p.classList.remove('active'));
       panes[t.dataset.tab].classList.add('active');
       if (t.dataset.tab === 'logs') {
-        loadLogs('all'); // 初回表示で読み込む
+        loadLogs('all');
       }
     });
   });
 
-  // --- コメント保存（1:1 即時反映） ---
+  // ========= コメント保存（1:1）＆ 個別投稿 =========
   document.querySelectorAll('.card').forEach(card => {
     const ta = card.querySelector('textarea.comment');
     const filename = card.dataset.filename;
     let timer = null;
     ta.addEventListener('input', () => {
       clearTimeout(timer);
-      timer = setTimeout(() => {
-        fetch('/api/override', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ filename, text: ta.value || "" })
-        });
+      timer = setTimeout(async () => {
+        try {
+          await fetchJSON('/api/override', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ filename, text: ta.value || "" })
+          });
+        } catch (e) {
+          alert('コメント保存失敗: ' + e.message);
+        }
       }, 300);
     });
 
-    // 個別投稿
     const btn = card.querySelector('.btn-post-one');
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -176,31 +235,41 @@
       btn.disabled = true; btn.textContent = '投稿中…';
       try {
         const r = await fetch('/publish_selected', { method: 'POST', body: fd });
-        const js = await r.json();
+        const ct = (r.headers.get('content-type') || '').toLowerCase();
+        let js;
+        if (ct.includes('application/json')) {
+          js = await r.json();
+        } else {
+          const txt = await r.text();
+          throw new Error(txt || 'server error');
+        }
         alert(js.ok ? ('OK: ' + (js.media_id || 'done')) : ('投稿失敗: ' + (js.error || 'unknown')));
         loadLogs('ig');
       } catch (err) {
-        alert('投稿失敗: ' + err);
+        alert('投稿失敗: ' + (err.message || err));
       } finally {
         btn.disabled = false; btn.textContent = 'この素材を投稿';
       }
     });
   });
 
-  // 並び順保存
+  // ========= 並び順保存 =========
   document.getElementById('btn-save-order').addEventListener('click', async (e) => {
     e.preventDefault();
     const order = Array.from(document.querySelectorAll('.card')).map(c => c.dataset.filename);
-    const r = await fetch('/api/materials_order', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ order })
-    });
-    const js = await r.json();
-    alert(js.ok ? '順序を保存しました' : ('保存失敗: ' + (js.error || 'unknown')));
+    try {
+      await fetchJSON('/api/materials_order', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ order })
+      });
+      alert('順序を保存しました');
+    } catch (e2) {
+      alert('保存失敗: ' + e2.message);
+    }
   });
 
-  // 全部投稿
+  // ========= 全部投稿 =========
   document.getElementById('btn-post-all').addEventListener('click', async (e) => {
     e.preventDefault();
     const fd = new FormData();
@@ -211,7 +280,14 @@
     btn.disabled = true; btn.textContent = '投稿中…';
     try {
       const r = await fetch('/publish_all_ordered', { method: 'POST', body: fd });
-      const js = await r.json();
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      let js;
+      if (ct.includes('application/json')) {
+        js = await r.json();
+      } else {
+        const txt = await r.text();
+        throw new Error(txt || 'server error');
+      }
       if (js.ok) {
         const ok = js.results.filter(x => x.ok).length;
         const ng = js.results.length - ok;
@@ -221,21 +297,24 @@
       }
       loadLogs('ig');
     } catch (err) {
-      alert('投稿失敗: ' + err);
+      alert('投稿失敗: ' + (err.message || err));
     } finally {
       btn.disabled = false; btn.textContent = '並び順で全部投稿';
     }
   });
 
-  // ランダムテキスト保存
+  // ========= ランダムテキスト保存 =========
   document.getElementById('btn-save-random').addEventListener('click', async () => {
     const body = document.getElementById('random-body').value || '';
-    const r = await fetch('/api/random_texts', { method: 'POST', body });
-    const js = await r.json();
-    alert(js.ok ? '保存しました' : ('失敗: ' + (js.error || 'unknown')));
+    try {
+      await fetchJSON('/api/random_texts', { method: 'POST', body });
+      alert('保存しました');
+    } catch (e) {
+      alert('失敗: ' + e.message);
+    }
   });
 
-  // 投稿ログ表示
+  // ========= 投稿ログ =========
   function loadLogs(which) {
     const view = document.getElementById('log-view');
     view.textContent = '読み込み中...';
@@ -247,6 +326,70 @@
   document.querySelectorAll('#pane-logs .btn').forEach(b => {
     b.addEventListener('click', () => loadLogs(b.dataset.log));
   });
+
+  // ========= アカウント管理 =========
+  const tbody = document.getElementById('accounts-tbody');
+  document.getElementById('btn-add-account').addEventListener('click', () => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" class="acc-no" value=""></td>
+      <td><input type="text" class="acc-label" value=""></td>
+      <td><input type="text" class="acc-ig" value=""></td>
+      <td><input type="text" class="acc-page" value=""></td>
+      <td><input type="text" class="acc-token" value=""></td>
+      <td>
+        <button class="btn btn-save-acc">保存</button>
+        <button class="btn btn-del-acc">削除</button>
+      </td>`;
+    tbody.appendChild(tr);
+    wireRow(tr);
+  });
+
+  function wireRow(tr) {
+    const btnSave = tr.querySelector('.btn-save-acc');
+    const btnDel = tr.querySelector('.btn-del-acc');
+    btnSave.addEventListener('click', async () => {
+      const no = tr.querySelector('.acc-no').value.trim();
+      const payload = {
+        action: 'add',
+        account: {
+          no,
+          label: tr.querySelector('.acc-label').value.trim(),
+          ig_user_id: tr.querySelector('.acc-ig').value.trim(),
+          page_id: tr.querySelector('.acc-page').value.trim(),
+          access_token: tr.querySelector('.acc-token').value.trim(),
+        }
+      };
+      try {
+        const js = await fetchJSON('/api/accounts', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        alert('保存しました');
+        // アカウント選択のプルダウンも更新したい場合は再読込
+        location.reload();
+      } catch (e) {
+        alert('保存失敗: ' + e.message);
+      }
+    });
+    btnDel.addEventListener('click', async () => {
+      const no = tr.querySelector('.acc-no').value.trim();
+      if (!no) { tr.remove(); return; }
+      try {
+        await fetchJSON('/api/accounts', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ action: 'delete', no })
+        });
+        tr.remove();
+        location.reload();
+      } catch (e) {
+        alert('削除失敗: ' + e.message);
+      }
+    });
+  }
+  document.querySelectorAll('#accounts-tbody tr').forEach(wireRow);
 </script>
 </body>
 </html>
