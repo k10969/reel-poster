@@ -8,22 +8,22 @@ from typing import Any, Dict, List, Optional
 
 from flask import Flask, jsonify, request, send_from_directory, render_template_string, Response
 
-# -------------- Flask --------------
+# ---------------- Flask ----------------
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 BASE = Path(__file__).parent.resolve()
 
-# -------------- パス定義 --------------
-ACCOUNTS_JSON = BASE / "accounts.json"        # {default_account_no:int, accounts:[{no,label,ig_user_id,page_id,...}]}
+# ---------------- パス ----------------
+ACCOUNTS_JSON = BASE / "accounts.json"
 MATERIAL_DIR   = BASE / "static" / "materials"
 BG_DIR         = BASE / "static" / "backgrounds"
 OUTPUT_DIR     = BASE / "static" / "output"
 TEXT_FILE      = BASE / "random_texts.txt"
-OVERRIDES_JSON = BASE / "material_overrides.json"   # 素材ごとのコメント保存
+OVERRIDES_JSON = BASE / "material_overrides.json"
 
 for d in [MATERIAL_DIR, BG_DIR, OUTPUT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# -------------- Import guard（落ちないWSGI） --------------
+# ---------------- Import guard ----------------
 _APP_IMPORT_ERR: Optional[str] = None
 try:
     from poster_core_reel import PosterCoreReel
@@ -90,30 +90,49 @@ def _list_materials() -> List[Dict[str, Any]]:
     return items
 
 def _pick_background_for_account(account_no: int) -> Optional[Path]:
-    # 優先: background{no}.mp4
     target = BG_DIR / f"background{account_no}.mp4"
     if target.exists():
         return target
-    # 代替: backgrounds 内の最初の mp4
     for p in sorted(BG_DIR.glob("*.mp4")):
         return p
     return None
 
 def _font_auto_hint() -> None:
-    """フォント環境変数が無ければ、fonts/keiofont.ttf があれば使うように設定"""
-    env_key = "REEL_FONT_PATH"
-    if os.environ.get(env_key):
+    if os.environ.get("REEL_FONT_PATH"):
         return
     candidate = BASE / "fonts" / "keiofont.ttf"
     if candidate.exists():
-        os.environ[env_key] = str(candidate)
+        os.environ["REEL_FONT_PATH"] = str(candidate)
+
+
+# =====================================================================
+#                               エラーハンドラ
+# =====================================================================
+def _is_api(path: str) -> bool:
+    return path.startswith("/api/")
+
+@app.errorhandler(Exception)
+def _json_error(e: Exception):
+    """
+    どの例外でも:
+      - /api/ なら JSON を返す
+      - それ以外は従来通り（HTML）
+    """
+    if _is_api(request.path):
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "trace": "".join(traceback.format_exception(type(e), e, e.__traceback__)),
+            "path": request.path,
+        }), 500
+    # 非APIは既定（HTML）
+    return Response("Internal Server Error", status=500, mimetype="text/plain")
 
 
 # =====================================================================
 #                                   API
 # =====================================================================
 
-# --- 起動時エラーを見せる ---
 if _APP_IMPORT_ERR:
     @app.get("/")
     def _error_root():
@@ -122,7 +141,6 @@ if _APP_IMPORT_ERR:
     @app.get("/__app_error")
     def _app_error():
         return Response(_APP_IMPORT_ERR, mimetype="text/plain", status=500)
-
 
 # ---------- アカウント ----------
 @app.get("/api/accounts")
@@ -136,7 +154,7 @@ def api_accounts_upsert():
     arr: List[Dict[str, Any]] = raw["accounts"]
     no = data.get("no")
     if no is None:
-        return jsonify({"error":"no required"}), 400
+        return jsonify({"ok": False, "error":"no required"}), 400
     idx = next((i for i,a in enumerate(arr) if a.get("no")==no), None)
     if idx is None:
         base = {
@@ -180,7 +198,7 @@ def api_materials_list():
 @app.post("/api/materials/upload")
 def api_materials_upload():
     if "files" not in request.files:
-        return jsonify({"error":"files field required"}), 400
+        return jsonify({"ok": False, "error":"files field required"}), 400
     files = request.files.getlist("files")
     saved = []
     for f in files:
@@ -198,7 +216,7 @@ def api_materials_comment():
     name = j.get("name")
     text = j.get("text","").strip()
     if not name:
-        return jsonify({"error":"name required"}), 400
+        return jsonify({"ok": False, "error":"name required"}), 400
     over = _load_overrides()
     if text:
         over[name] = text
@@ -223,77 +241,82 @@ def api_random_texts_save():
     j = request.get_json(force=True) or {}
     lines = j.get("lines", [])
     if not isinstance(lines, list):
-        return jsonify({"error":"lines must be list"}), 400
+        return jsonify({"ok": False, "error":"lines must be list"}), 400
     TEXT_FILE.write_text("\n".join([str(x) for x in lines]), encoding="utf-8")
     return jsonify({"ok": True})
 
-# ---------- 投稿（ここが“本番”） ----------
+# ---------- 投稿 ----------
 @app.post("/api/post")
 def api_post():
-    if PosterCoreReel is None:
-        return jsonify({"error":"PosterCoreReel import failed"}), 500
+    try:
+        if PosterCoreReel is None:
+            raise RuntimeError("PosterCoreReel import failed")
 
-    j = request.get_json(force=True) or {}
-    # パラメータ
-    selected_names: List[str] = j.get("materials") or []
-    account_no: Optional[int] = j.get("account_no")
-    post_all_accounts: bool = bool(j.get("post_all_accounts", False))
-    share_to_feed: bool = bool(j.get("share_to_feed", False))
+        j = request.get_json(force=True) or {}
+        selected_names: List[str] = j.get("materials") or []
+        account_no: Optional[int] = j.get("account_no")
+        post_all_accounts: bool = bool(j.get("post_all_accounts", False))
+        share_to_feed: bool = bool(j.get("share_to_feed", False))
 
-    accounts = _read_accounts()
-    acc_list: List[Dict[str, Any]] = accounts.get("accounts", [])
-    if not acc_list:
-        return jsonify({"error":"no accounts"}), 400
+        accounts = _read_accounts()
+        acc_list: List[Dict[str, Any]] = accounts.get("accounts", [])
+        if not acc_list:
+            return jsonify({"ok": False, "error":"no accounts"}), 400
 
-    # 対象素材
-    mats = _list_materials()
-    if selected_names:
-        mats = [m for m in mats if m["name"] in set(selected_names)]
-    if not mats:
-        return jsonify({"error":"no materials"}), 400
+        mats = _list_materials()
+        if selected_names:
+            mats = [m for m in mats if m["name"] in set(selected_names)]
+        if not mats:
+            return jsonify({"ok": False, "error":"no materials"}), 400
 
-    # 対象アカウント
-    target_accounts: List[int] = []
-    if post_all_accounts:
-        target_accounts = [int(a["no"]) for a in acc_list]
-    else:
-        if account_no is None:
-            # デフォルト
-            account_no = int(accounts.get("default_account_no") or acc_list[0]["no"])
-        target_accounts = [int(account_no)]
+        if post_all_accounts:
+            target_accounts = [int(a["no"]) for a in acc_list]
+        else:
+            if account_no is None:
+                account_no = int(accounts.get("default_account_no") or acc_list[0]["no"])
+            target_accounts = [int(account_no)]
 
-    # フォントの自動ヒント
-    _font_auto_hint()
+        _font_auto_hint()
+        over = _load_overrides()
+        core = PosterCoreReel()
+        results: List[Dict[str, Any]] = []
 
-    # 実行
-    over = _load_overrides()
-    core = PosterCoreReel()
-    results: List[Dict[str, Any]] = []
+        for acc_no in target_accounts:
+            bg = _pick_background_for_account(acc_no)
+            if bg is None:
+                return jsonify({"ok": False, "error": f"背景動画が見つかりません（static/backgrounds/ に background{acc_no}.mp4 か、少なくとも1本のmp4を置いてください）"}), 400
+            for m in mats:
+                name = m["name"]
+                mat_path = MATERIAL_DIR / name
+                if not mat_path.exists():
+                    results.append({"material": name, "account_no": acc_no, "ok": False, "error": "material not found"})
+                    continue
+                custom_text = over.get(name, "").strip() or None
+                try:
+                    media_id = core.post_reel(
+                        account_no=acc_no,
+                        overlay_path=mat_path,
+                        background_path=bg,
+                        custom_overlay_text=custom_text,
+                        share_to_feed=share_to_feed,
+                    )
+                    results.append({"material": name, "account_no": acc_no, "ok": True, "media_id": media_id})
+                except Exception as e:
+                    results.append({
+                        "material": name,
+                        "account_no": acc_no,
+                        "ok": False,
+                        "error": str(e),
+                        "trace": "".join(traceback.format_exception(type(e), e, e.__traceback__)),
+                    })
 
-    for acc_no in target_accounts:
-        bg = _pick_background_for_account(acc_no)
-        if bg is None:
-            return jsonify({"error": f"背景動画が見つかりません（static/backgrounds/ に background{acc_no}.mp4 を置くか、少なくとも1本のmp4を置いてください）"}), 400
-        for m in mats:
-            name = m["name"]
-            mat_path = MATERIAL_DIR / name
-            if not mat_path.exists():
-                results.append({"material": name, "account_no": acc_no, "ok": False, "error": "material not found"})
-                continue
-            custom_text = over.get(name, "").strip()  # 空ならcore側でrandom_texts.txtから拾う
-            try:
-                media_id = core.post_reel(
-                    account_no=acc_no,
-                    overlay_path=mat_path,
-                    background_path=bg,
-                    custom_overlay_text=custom_text if custom_text else None,
-                    share_to_feed=share_to_feed,
-                )
-                results.append({"material": name, "account_no": acc_no, "ok": True, "media_id": media_id})
-            except Exception as e:
-                results.append({"material": name, "account_no": acc_no, "ok": False, "error": str(e)})
-
-    return jsonify({"ok": True, "results": results})
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "trace": "".join(traceback.format_exception(type(e), e, e.__traceback__)),
+        }), 500
 
 
 # =====================================================================
@@ -334,7 +357,6 @@ INDEX_HTML = r"""
 <body>
   <h1>動画リール投稿ツール</h1>
 
-  <!-- 常時表示のアクションバー（元UIの位置に合わせる） -->
   <div class="topbar">
     <button class="btn" id="btn-add">＋追加/更新</button>
     <button class="btn" id="btn-del">🗑 削除</button>
@@ -349,16 +371,13 @@ INDEX_HTML = r"""
     <span id="status" class="muted">待機中</span>
   </div>
 
-  <!-- タブ -->
   <div class="tabs">
     <div class="tab active" data-tab="post">投稿</div>
     <div class="tab" data-tab="random">ランダムテキスト</div>
   </div>
 
-  <!-- 投稿パネル -->
   <div class="panel" id="panel-post">
     <div class="grid">
-      <!-- 左: 素材 -->
       <div>
         <div class="stack">
           <input type="file" id="file-mats" multiple>
@@ -367,7 +386,6 @@ INDEX_HTML = r"""
         </div>
         <div class="materials" id="materials"></div>
       </div>
-      <!-- 右: コメント（選んだ素材と1:1） -->
       <div>
         <div class="stack"><b>コメント（素材ごと1:1）</b><span class="muted">空ならランダムテキストから自動</span></div>
         <textarea id="comment-box" class="comment" placeholder="選択中の素材用コメント…"></textarea>
@@ -379,7 +397,6 @@ INDEX_HTML = r"""
     </div>
   </div>
 
-  <!-- ランダムテキスト -->
   <div class="panel" id="panel-random" style="display:none;">
     <div class="stack">
       <button class="btn" id="btn-rand-save">💾 保存</button>
@@ -395,10 +412,9 @@ const $ = s => document.querySelector(s);
 const statusBox = $("#status");
 
 let state = { accounts:[], default_account_no:1 };
-let materials = []; // {name,path,ext,comment}
+let materials = [];
 let selectedName = null;
 
-// ---------- helpers ----------
 function setStatus(t){ statusBox.textContent = t; }
 
 function renderAccounts(){
@@ -445,12 +461,10 @@ function renderMaterials(){
     const name = document.createElement("div");
     name.className="name"; name.textContent = m.name;
     card.appendChild(name);
-
     card.addEventListener("click", (e)=>{
       if(e.target===chk) return;
       selectMaterial(m.name);
     });
-
     wrap.appendChild(card);
   }
 }
@@ -460,7 +474,6 @@ function selectMaterial(name){
   const m = materials.find(x=>x.name===name);
   $("#sel-name").textContent = name ? `選択中: ${name}` : "未選択";
   $("#comment-box").value = m?.comment || "";
-  // カードの選択ハイライトはチェックで代用
 }
 
 async function loadAll(){
@@ -473,15 +486,12 @@ async function loadAll(){
   state = await aRes.json();
   materials = await mRes.json();
   const rand = await rRes.json();
-
   renderAccounts();
   renderMaterials();
-
   $("#rand-box").value = (rand.lines||[]).join("\n");
   setStatus("準備完了");
 }
 
-// ---------- events ----------
 $("#btn-refresh").addEventListener("click", loadAll);
 
 $("#btn-add").addEventListener("click", async ()=>{
@@ -495,16 +505,16 @@ $("#btn-add").addEventListener("click", async ()=>{
     page_id: $("#page-id").value || src.page_id || "",
   };
   const r = await fetch("/api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)});
-  if(r.ok){ setStatus("保存しました"); state = await r.json(); renderAccounts(); }
-  else setStatus("保存失敗");
+  setStatus(r.ok ? "保存しました" : "保存失敗");
+  if(r.ok){ state = await r.json(); renderAccounts(); }
 });
 
 $("#btn-del").addEventListener("click", async ()=>{
   const no = accountSelected();
   if(!no) return;
   const r = await fetch(`/api/accounts/${no}`, {method:"DELETE"});
-  if(r.ok){ setStatus("削除しました"); state = await r.json(); renderAccounts(); }
-  else setStatus("削除失敗");
+  setStatus(r.ok ? "削除しました" : "削除失敗");
+  if(r.ok){ state = await r.json(); renderAccounts(); }
 });
 
 $("#sel-accounts").addEventListener("change", ()=>{
@@ -524,10 +534,6 @@ $("#btn-upload").addEventListener("click", async ()=>{
   if(r.ok){ await loadAll(); setStatus("アップロード完了"); } else setStatus("アップロード失敗");
 });
 
-$("#materials").addEventListener("change", (e)=>{
-  // クリックしたカードのチェックON/OFFはそのまま
-});
-
 $("#btn-save-comment").addEventListener("click", async ()=>{
   if(!selectedName){ alert("素材を選択してください"); return; }
   const text = $("#comment-box").value;
@@ -542,7 +548,6 @@ $("#btn-save-comment").addEventListener("click", async ()=>{
 });
 
 $("#btn-post").addEventListener("click", async ()=>{
-  // 選択チェックの素材を集める（未選択なら全素材）
   const chosen = Array.from(document.querySelectorAll("#materials .card input.check:checked"))
     .map(chk=>chk.parentElement.dataset.name);
   const mats = chosen.length ? chosen : materials.map(m=>m.name);
@@ -555,34 +560,37 @@ $("#btn-post").addEventListener("click", async ()=>{
     share_to_feed: $("#chk-feed").checked
   };
   setStatus("投稿実行中…");
-  const r = await fetch("/api/post", {method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload)});
   let msg = "";
   try{
-    const j = await r.json();
-    if(j.ok){
-      msg = "投稿完了: " + JSON.stringify(j.results);
-    }else{
-      msg = "投稿失敗: " + (j.error||"");
+    const r = await fetch("/api/post", {method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload)});
+    const text = await r.text();
+    try{
+      const j = JSON.parse(text);
+      if(j.ok){
+        msg = "投稿完了: " + JSON.stringify(j.results);
+      }else{
+        msg = "投稿失敗: " + (j.error||"") + (j.trace? "\n---\n"+j.trace : "");
+      }
+    }catch(_){
+      msg = "投稿失敗: サーバからJSON以外が返却\n---\n" + text.slice(0,2000);
     }
-  }catch(_){
-    msg = "投稿失敗: API応答が不正（JSON以外）";
+  }catch(err){
+    msg = "投稿失敗: フロントのfetchで例外: " + err;
   }
   setStatus(msg);
   alert(msg);
 });
 
-// タブ
 for(const el of document.querySelectorAll(".tab")){
   el.addEventListener("click", ()=>{
     document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
     el.classList.add("active");
     const tab = el.dataset.tab;
-    $("#panel-post").style.display = tab==="post" ? "" : "none";
-    $("#panel-random").style.display = tab==="random" ? "" : "none";
+    document.getElementById("panel-post").style.display = tab==="post" ? "" : "none";
+    document.getElementById("panel-random").style.display = tab==="random" ? "" : "none";
   });
 }
 
-// ランダムテキスト保存（都度）
 $("#rand-box").addEventListener("input", async ()=>{
   const lines = $("#rand-box").value.split("\n");
   await fetch("/api/random_texts", {method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({lines})});
@@ -594,7 +602,6 @@ $("#btn-rand-save").addEventListener("click", async ()=>{
   setStatus(r.ok ? "ランダムテキスト保存" : "保存失敗");
 });
 
-// 初期化
 loadAll();
 </script>
 </body>
@@ -609,15 +616,9 @@ def index():
 def healthz():
     return "ok", 200
 
-# 静的: 背景/素材/出力は static/ 以下を直接配信（Flaskのstatic機能でOK）
 @app.get("/static/<path:filename>")
 def static_files(filename: str):
     return send_from_directory(app.static_folder, filename, conditional=True)
 
-
-# =====================================================================
-#                               エントリ
-# =====================================================================
 if __name__ == "__main__":
-    # 本番Renderではgunicorn起動、ローカルはこれでOK
     app.run(host="0.0.0.0", port=int(os.getenv("PORT","8000")), debug=True)
