@@ -7,3 +7,6 @@ numpy<2
 pillow<10
 decorator<5.2
 proglog==0.1.9
+requests>=2.31.0
+cloudinary>=1.41.0
+python-dotenv>=1.0.1

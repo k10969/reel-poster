@@ -37,6 +37,7 @@
 </head>
 <body>
 
+<!-- 上部ツールバー -->
 <div class="toolbar">
   <div class="tab active" onclick="0">投稿</div>
   <div class="tab" onclick="location.href='/random_texts'">ランダムテキスト</div>
@@ -48,6 +49,7 @@
 
 <div class="wrap">
 
+  <!-- アカウント管理 -->
   <div class="panel">
     <div class="panel-hd">アカウント選択</div>
     <div class="panel-bd">
@@ -57,6 +59,7 @@
           <label>ラベル</label><input id="accLabel" type="text" style="width:140px">
           <label>IGユーザーID</label><input id="accIG" type="text" style="width:220px">
           <label>ページID</label><input id="accPage" type="text" style="width:220px">
+          <label>Access Token</label><input id="accToken" type="text" style="width:320px" placeholder="EAAG...">
         </div>
         <button class="primary" onclick="upsertAcc()">+追加/更新</button>
         <button onclick="tokenRefresh()">トークン更新</button>
@@ -70,13 +73,14 @@
         <button onclick="reloadAcc()">更新</button>
       </div>
       <div class="muted" style="margin-top:6px">
-        アカウントは <code>accounts.json</code> に保存（UIのみ。GraphAPI接続は後から可）。
+        アカウントは <code>accounts.json</code> に保存（UIのみ。GraphAPI接続は本体で実行）。
       </div>
     </div>
   </div>
 
+  <!-- 素材一覧 -->
   <div class="panel">
-    <div class="panel-hd">overlay_input の素材一覧（外部DND=移動、行DND=順序変更、右列ダブルクリックでテキスト編集、サムネダブルクリックで拡大）</div>
+    <div class="panel-hd">overlay_input の素材一覧（D&Dで順序変更、右列ダブルクリックでテキスト編集、サムネダブルクリックで拡大）</div>
     <div class="panel-bd">
       <div class="row" style="margin-bottom:8px">
         <form action="/upload?target=overlay" method="post" enctype="multipart/form-data" class="row">
@@ -138,6 +142,7 @@
     </div>
   </div>
 
+  <!-- 合成設定 -->
   <div class="panel">
     <div class="panel-hd">合成（今のツール準拠）</div>
     <div class="panel-bd">
@@ -215,6 +220,7 @@
     </div>
   </div>
 
+  <!-- 進捗 -->
   <div class="panel">
     <div class="panel-hd">進捗</div>
     <div class="panel-bd">
@@ -226,16 +232,26 @@
     </div>
   </div>
 
+  <!-- 出力＆投稿 -->
   <div class="panel">
     <div class="panel-hd">出力（output）</div>
     <div class="panel-bd">
+      <!-- 投稿UI（アカウント選択＋キャプション） -->
+      <div class="row" style="margin-bottom:10px">
+        <select id="postAccount" style="min-width:220px"></select>
+        <input type="text" id="postCaption" placeholder="キャプション（任意）" style="flex:1;min-width:240px">
+      </div>
+
       <div class="row" style="flex-wrap:wrap;gap:12px">
         {% for out in outs_rows %}
           <div style="width:320px">
             <video controls playsinline preload="metadata" src="{{ url_for('static_passthrough', subpath='output/' ~ out) }}" style="width:100%;border:1px solid #eee;border-radius:6px"></video>
             <div class="row" style="justify-content:space-between">
               <div class="muted" style="font-size:12px">{{ out }}</div>
-              <button onclick="location.href='{{ url_for('download_output', filename=out) }}'">DL</button>
+              <div class="row" style="gap:6px">
+                <button onclick="location.href='{{ url_for('download_output', filename=out) }}'">DL</button>
+                <button class="primary" onclick="publishOutput('{{ out }}')">投稿</button>
+              </div>
             </div>
           </div>
         {% endfor %}
@@ -249,14 +265,17 @@
 </div>
 
 <script>
+  // 並べ替え
   new Sortable(document.getElementById('tbl'), {animation:150, handle:'.handle', ghostClass:'dragging'});
 
+  // 合成セレクトへ反映
   function chooseForCombine(name){
     const sel = document.getElementById('overlaySelect');
     [...sel.options].forEach(o => { if(o.value===name) o.selected = true; });
     window.scrollTo({top: document.body.scrollHeight, behavior:'smooth'});
   }
 
+  // 順序 & テキスト保存
   async function saveMaterials(){
     const rows = [...document.querySelectorAll('#tbl tr[data-fname]')];
     const order = rows.map(r => r.dataset.fname);
@@ -266,41 +285,65 @@
     alert(res.ok ? '更新しました' : '保存に失敗しました');
   }
 
+  // 疑似バッチ進捗
   function startBatch(){
-    document.getElementById('status').textContent = '投稿キュー作成中…（UIのみ。GraphAPIは未接続）';
+    document.getElementById('status').textContent = '投稿キュー作成中…（UIのみ）';
     let w=0; const bar=document.getElementById('bar');
     const t=setInterval(()=>{ w=Math.min(100,w+5); bar.style.width=w+'%'; if(w>=100) clearInterval(t); },100);
   }
 
+  // アカウント読込（accSelect と postAccount 両方に反映）
   async function reloadAcc(){
     const r = await fetch('/accounts'); const js = await r.json();
-    const sel = document.getElementById('accSelect'); sel.innerHTML='';
-    js.accounts.forEach(a => {
-      const opt=document.createElement('option');
-      opt.value=a.no; opt.textContent=`${a.no}. ${a.label} (IG:${a.ig_user_id} / Page:${a.page_id})`;
-      sel.appendChild(opt);
+    const sel = document.getElementById('accSelect'); if(sel) sel.innerHTML='';
+    const sel2 = document.getElementById('postAccount'); if(sel2) sel2.innerHTML='';
+    (js.accounts||[]).forEach(a => {
+      const label = `${a.no}. ${a.label} (IG:${a.ig_user_id})`;
+      if(sel){ const opt=document.createElement('option'); opt.value=a.no; opt.textContent=label; sel.appendChild(opt); }
+      if(sel2){ const o2=document.createElement('option'); o2.value=a.no; o2.textContent=label; sel2.appendChild(o2); }
     });
   }
+
+  // アカウント登録/削除UI（access_token対応）
   async function upsertAcc(){
     const body = {
       no: document.getElementById('accNo').value.trim(),
       label: document.getElementById('accLabel').value.trim(),
       ig_user_id: document.getElementById('accIG').value.trim(),
-      page_id: document.getElementById('accPage').value.trim()
+      page_id: document.getElementById('accPage').value.trim(),
+      access_token: document.getElementById('accToken').value.trim()
     };
     const r = await fetch('/accounts/upsert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(r.ok){ alert('保存しました'); reloadAcc(); }
+    else{ alert('保存に失敗'); }
   }
   async function delAcc(){
     const no = document.getElementById('accNo').value.trim();
     if(!no) return alert('番号を入れてください');
     const r = await fetch('/accounts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({no})});
     if(r.ok){ alert('削除しました'); reloadAcc(); }
+    else{ alert('削除に失敗'); }
   }
-  function tokenRefresh(){ alert('トークン更新（UIのみ）'); }
-  function tokenCheck(){ alert('トークン有効期限チェック（UIのみ）'); }
+  function tokenRefresh(){ alert('トークン更新（API連携は本体側で）'); }
+  function tokenCheck(){ alert('トークン有効期限チェック（API連携は本体側で）'); }
+
+  // 出力の投稿
+  async function publishOutput(filename){
+    const accSel = document.getElementById('postAccount');
+    if(!accSel || !accSel.value) return alert('投稿アカウントを選択してください');
+    const caption = document.getElementById('postCaption') ? document.getElementById('postCaption').value : '';
+    const body = { account_no: accSel.value, filename: filename, caption: caption };
+    const res = await fetch('/publish', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const js = await res.json().catch(()=>({}));
+    if(res.ok && js.ok){
+      alert('投稿成功！' + (js.permalink ? `\n${js.permalink}` : ''));
+    }else{
+      alert('投稿失敗: ' + (js.error ? JSON.stringify(js.error) : res.status));
+    }
+  }
+
+  // 初期ロード
   reloadAcc();
 </script>
 </body>
 </html>
-

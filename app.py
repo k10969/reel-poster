@@ -1,6 +1,11 @@
 import os
 import time
 import json
+from dotenv import load_dotenv
+from cloudinary_helper import upload_media_local
+from graph_publisher import ig_post_now
+load_dotenv()  # .env を読み込む（Renderもローカルも対応）
+
 from pathlib import Path
 from typing import Tuple
 
@@ -123,6 +128,80 @@ def _load_json(p: Path, default):
 
 def _save_json(p: Path, obj):
     p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+load_dotenv()
+
+@app.route("/publish", methods=["POST"])
+def publish_reel():
+    data = request.get_json(silent=True) or {}
+    acc_no = str(data.get("account_no", "")).strip()
+    video_path = data.get("video_path")
+    caption = data.get("caption", "")
+
+    # アカウント取得
+    accs = _load_accounts()
+    account = next((a for a in accs["accounts"] if str(a.get("no")) == acc_no), None)
+    if not account:
+        return {"ok": False, "error": "account not found"}, 404
+
+    ig_user_id = account["ig_user_id"]
+    access_token = account["access_token"]
+
+    # Cloudinaryにアップロード
+    url, res_type = upload_media_local(video_path)
+    if res_type != "video":
+        return {"ok": False, "error": "uploaded file is not video"}, 400
+
+    # IG投稿
+    result = ig_post_now(ig_user_id, url, True, caption, access_token)
+    return result
+@app.route("/publish", methods=["POST"])
+def publish_reel():
+    """
+    JSON入力:
+    {
+      "account_no": "1",           # accounts.json 内の no
+      "filename": "xxx.mp4",       # static/output 内のファイル名
+      "caption": "任意キャプション"
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    acc_no = str(data.get("account_no", "")).strip()
+    filename = data.get("filename", "")
+    caption = data.get("caption", "")
+
+    if not acc_no or not filename:
+        return {"ok": False, "error": "account_no and filename are required"}, 400
+
+    # アカウント取得
+    accs = _load_accounts()
+    account = next((a for a in accs.get("accounts", []) if str(a.get("no", "")) == acc_no), None)
+    if not account:
+        return {"ok": False, "error": "account not found"}, 404
+
+    ig_user_id = account.get("ig_user_id", "")
+    access_token = account.get("access_token", "")
+    if not ig_user_id or not access_token:
+        return {"ok": False, "error": "ig_user_id/access_token missing"}, 400
+
+    # ファイル存在確認
+    local_path = safe_join(OUTPUT_DIR, filename)
+    if not local_path.exists():
+        return {"ok": False, "error": "file not found"}, 404
+
+    # Cloudinary へアップロード
+    try:
+        url, rtype = upload_media_local(str(local_path))
+    except Exception as e:
+        return {"ok": False, "error": f"cloudinary upload failed: {e}"}, 500
+
+    # Graph API で投稿
+    try:
+        result = ig_post_now(ig_user_id, url, True, caption, access_token)
+    except Exception as e:
+        return {"ok": False, "error": f"graph publish failed: {e}"}, 500
+
+    return result
 
 # -------- routes --------
 @app.route("/")
@@ -423,7 +502,8 @@ def accounts_upsert():
                 "no": no,
                 "label": data.get("label", ""),
                 "ig_user_id": data.get("ig_user_id", ""),
-                "page_id": data.get("page_id", "")
+                "page_id": data.get("page_id", ""),
+                "access_token": data.get("access_token", a.get("access_token", "")),
             })
             found = True
             break
@@ -432,10 +512,12 @@ def accounts_upsert():
             "no": no,
             "label": data.get("label", ""),
             "ig_user_id": data.get("ig_user_id", ""),
-            "page_id": data.get("page_id", "")
+            "page_id": data.get("page_id", ""),
+            "access_token": data.get("access_token", ""),
         })
     _save_accounts(accs)
     return {"ok": True}
+
 
 @app.route("/accounts/delete", methods=["POST"])
 def accounts_delete():
