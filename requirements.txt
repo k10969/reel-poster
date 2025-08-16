@@ -1,0 +1,4 @@
+flask
+moviepy
+pillow
+gunicorn
