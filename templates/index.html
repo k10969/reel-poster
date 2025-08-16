@@ -1,249 +1,261 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
+  <title>投稿</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Reel Poster</title>
+  <link rel="stylesheet" href="https://unpkg.com/modern-css-reset/dist/reset.min.css">
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";margin:0;background:#0b0b0b;color:#fff}
-    header{padding:12px 16px;border-bottom:1px solid #222;display:flex;gap:12px;align-items:center}
-    main{display:grid;grid-template-columns:320px 1fr;gap:16px;padding:16px}
-    aside{border-right:1px solid #222;padding-right:12px}
-    .mat{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px}
-    .mat:hover{background:#151515}
-    .thumb{width:64px;height:64px;object-fit:cover;background:#222;border-radius:6px}
-    .row{display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center;margin-bottom:8px}
-    textarea,input,select,button{background:#141414;color:#fff;border:1px solid #2a2a2a;border-radius:8px;padding:8px}
-    textarea{width:100%;min-height:56px;resize:vertical}
-    .btn{cursor:pointer}
-    .btn.primary{background:#1e88e5;border-color:#1e88e5}
-    .btn.ghost{background:transparent}
-    .pill{display:inline-flex;align-items:center;gap:8px}
-    .tabs{display:flex;gap:8px;border-bottom:1px solid #222;margin:0 16px}
-    .tab{padding:10px 12px;border-bottom:2px solid transparent;cursor:pointer;color:#aaa}
-    .tab.active{color:#fff;border-color:#1e88e5}
-    .hidden{display:none}
-    .log{white-space:pre-wrap;background:#0f0f0f;border:1px solid #222;border-radius:8px;padding:8px}
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "ヒラギノ角ゴ ProN", "Hiragino Kaku Gothic ProN", "メイリオ", Meiryo, sans-serif; padding: 16px; }
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .btn { background:#198754; color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; }
+    .btn.sub { background:#0d6efd; }
+    .btn.warn { background:#dc3545; }
+    .btn.gray { background:#6c757d; }
+    select, input[type="text"], input[type="number"] { padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
+    .switch { display:inline-flex; align-items:center; gap:6px; }
+    .panel { border:1px solid #ddd; border-radius:10px; padding:14px; margin-top:10px; }
+    .header { font-weight:700; font-size:18px; margin-bottom:8px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #eee; padding:10px; vertical-align:top; }
+    th { color:#333; }
+    .thumb { width:120px; height:120px; object-fit:cover; border:1px solid #ddd; border-radius:6px; cursor:zoom-in; }
+    .empty { color:#888; padding:8px 0; }
+    .col-thumb { width:140px; }
+    .col-filename { width:240px; color:#666; }
+    .col-text { min-width:260px; }
+    .row { cursor:grab; }
+    .progress { height:8px; background:#f2f2f2; border-radius:6px; overflow:hidden; }
+    .bar { height:100%; width:0%; background:#0d6efd; transition:width .2s; }
+    .right { margin-left:auto; }
+    .check { transform:scale(1.2); }
+    .muted { color:#6c757d; font-size:12px; }
   </style>
+  <!-- SortableJS for D&D 並び替え -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
-<header>
-  <strong>Reel Poster</strong>
-  <div class="row" style="grid-template-columns:120px 220px;margin:0;">
-    <label>アカウント</label>
+  <!-- 上部ツールバー -->
+  <div class="toolbar">
+    <strong>投稿</strong>
+    <label>番号
+      <input id="accountNo" type="number" value="1" min="1" style="width:80px">
+    </label>
     <select id="accountSelect"></select>
+    <button id="tokenRefresh" class="btn sub">トークン更新</button>
+    <button id="tokenCheck" class="btn sub">トークン有効期限チェック</button>
+    <button id="tokenRevoke" class="btn warn">削除</button>
+
+    <label class="switch">
+      <input id="allAccounts" type="checkbox">
+      <span>全アカウント（分散投稿）</span>
+    </label>
+
+    <button id="reload" class="btn gray">更新</button>
+    <button id="doPost" class="btn right btn">投稿実行</button>
   </div>
-  <label class="pill">
-    <input id="shareToFeed" type="checkbox" />
-    フィードにも共有
-  </label>
-  <button class="btn primary" id="btnPostSelected">選択投稿</button>
-  <button class="btn" id="btnPostAll">全投稿</button>
-</header>
 
-<nav class="tabs">
-  <div class="tab active" data-tab="tab-post">投稿</div>
-  <div class="tab" data-tab="tab-random">ランダムテキスト</div>
-  <div class="tab" data-tab="tab-accounts">アカウント</div>
-  <div class="tab" data-tab="tab-logs">投稿ログ</div>
-</nav>
+  <!-- 素材一覧 -->
+  <div class="panel">
+    <div class="header">overlay_input の素材一覧（外部D&D移動、右列ダブルクリックでテキスト編集、サムネダブルクリックで拡大）</div>
 
-<main id="tab-post" class="tabpane">
-  <aside>
-    <div id="materials"></div>
-    <div style="margin-top:12px">
-      <input id="fileInput" type="file" multiple accept="image/*,video/*" />
-      <button class="btn" id="btnUpload">素材追加</button>
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <label class="btn gray">
+        + 素材追加…（iPhone）
+        <input id="fileInput" type="file" accept="image/*,video/*" multiple style="display:none">
+      </label>
+      <button id="removeSelected" class="btn warn">素材削除</button>
     </div>
-  </aside>
-  <section>
-    <div id="commentList"></div>
-  </section>
-</main>
 
-<main id="tab-random" class="tabpane hidden">
-  <section style="grid-column: 1 / -1;">
-    <p>1行につき1候補。空欄が来た素材はここからランダムで使う。</p>
-    <textarea id="randomTexts" placeholder="例：\nこの後どうなる？\n続きはプロフから\n…"></textarea>
-    <div style="margin-top:8px">
-      <button class="btn primary" id="btnSaveRandom">保存</button>
-      <span id="randStatus"></span>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:32px;"></th>
+          <th class="col-thumb">サムネ</th>
+          <th class="col-filename">ファイル名</th>
+          <th class="col-text">テキスト（空ならランダム）</th>
+        </tr>
+      </thead>
+      <tbody id="materialsBody">
+        <tr id="emptyRow"><td colspan="4" class="empty">素材がありません。上の「+素材追加…」からアップロードしてください。</td></tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top:12px;">
+      <div class="progress"><div id="progBar" class="bar"></div></div>
+      <div class="muted">進捗</div>
     </div>
-  </section>
-</main>
+  </div>
 
-<main id="tab-accounts" class="tabpane hidden">
-  <section style="grid-column: 1 / -1;">
-    <p>accounts.json を編集（no / ig_user_id / page_id / page_token …）。</p>
-    <textarea id="accountsJson" style="min-height:240px"></textarea>
-    <div style="margin-top:8px">
-      <button class="btn primary" id="btnSaveAccounts">保存</button>
-      <span id="acctStatus"></span>
-    </div>
-  </section>
-</main>
+  <script>
+    // ---- 状態 ----
+    let accounts = [];
+    let materials = [];   // [{name, url, text, selected}]
+    const bodyEl = document.getElementById('materialsBody');
+    const emptyEl = document.getElementById('emptyRow');
+    const accountSel = document.getElementById('accountSelect');
+    const accountNoEl = document.getElementById('accountNo');
 
-<main id="tab-logs" class="tabpane hidden">
-  <section style="grid-column: 1 / -1;">
-    <pre class="log" id="logBox">ここに /api/publish の結果が表示されます。</pre>
-  </section>
-</main>
+    // ---- 初期化 ----
+    init();
 
-<script>
-  // ---- 初期データ（サーバ埋め込み） ----
-  const SERVER_ACCOUNTS = {{ (accounts|tojson)|safe if accounts is defined else '[]' }};
-  const SERVER_MATERIALS = {{ (materials|tojson)|safe if materials is defined else '[]' }};
-  const INITIAL_COMMENTS = {{ (initial_comments|tojson)|safe if initial_comments is defined else '{}' }};
-
-  // ---- タブ ----
-  const tabs = document.querySelectorAll('.tab');
-  const panes = document.querySelectorAll('.tabpane');
-  tabs.forEach(t => t.onclick = () => {
-    tabs.forEach(x => x.classList.remove('active'));
-    panes.forEach(p => p.classList.add('hidden'));
-    t.classList.add('active');
-    document.getElementById(t.dataset.tab).classList.remove('hidden');
-  });
-
-  // ---- アカウント ----
-  const accountSelect = document.getElementById('accountSelect');
-  function renderAccounts(accs){
-    accountSelect.innerHTML = '';
-    accs.forEach(a=>{
-      const opt = document.createElement('option');
-      opt.value = a.no;
-      opt.textContent = `#${a.no}`;
-      accountSelect.appendChild(opt);
-    });
-  }
-  renderAccounts(SERVER_ACCOUNTS);
-
-  // アカウント編集タブ
-  const accountsJson = document.getElementById('accountsJson');
-  accountsJson.value = JSON.stringify(SERVER_ACCOUNTS, null, 2);
-  document.getElementById('btnSaveAccounts').onclick = async () => {
-    try{
-      const arr = JSON.parse(accountsJson.value || '[]');
-      const res = await fetch('/api/accounts', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({accounts:arr})});
-      const data = await res.json();
-      document.getElementById('acctStatus').textContent = data.ok ? '保存OK' : ('保存失敗: '+(data.error||''));
-      if(data.ok){ renderAccounts(arr); }
-    }catch(e){
-      document.getElementById('acctStatus').textContent = '保存失敗: '+e;
+    async function init() {
+      await loadAccounts();
+      await loadMaterials();
+      wireToolbar();
+      makeSortable();
     }
-  };
 
-  // ---- 素材リスト / コメント1:1 ----
-  const materialsBox = document.getElementById('materials');
-  const commentList = document.getElementById('commentList');
-  let MATERIALS = [...SERVER_MATERIALS];
-  const commentMap = Object.assign({}, INITIAL_COMMENTS); // { filename: comment }
+    async function loadAccounts() {
+      const r = await fetch('/api/accounts');
+      accounts = await r.json();
+      accountSel.innerHTML = '';
+      accounts.forEach((a, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx+1);
+        opt.textContent = `${idx+1}. ${a.label} (IG:${a.ig_user_id} / Page:${a.page_id})`;
+        accountSel.appendChild(opt);
+      });
+      // 番号 → セレクト連動
+      const n = Number(accountNoEl.value||1);
+      if (n>=1 && n<=accounts.length) accountSel.value = String(n);
+      accountNoEl.addEventListener('change', ()=>accountSel.value = String(Number(accountNoEl.value||1)));
+      accountSel.addEventListener('change', ()=>accountNoEl.value = String(Number(accountSel.value||1)));
+    }
 
-  function matRow(name){
-    const wrap = document.createElement('div'); wrap.className='mat';
-    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=name;
-    const th = document.createElement(name.match(/\.(mp4|mov|m4v|avi|mkv|webm)$/i)?'video':'img');
-    th.className='thumb';
-    th.src = `/static/overlay_input/${name}`;
-    if(th.tagName==='VIDEO'){ th.muted=true; th.loop=true; th.playsInline=true; th.autoplay=true; th.src += '#t=0.1'; th.style.objectFit='cover'; }
-    const label = document.createElement('div'); label.textContent = name;
-    wrap.appendChild(cb); wrap.appendChild(th); wrap.appendChild(label);
-    return wrap;
-  }
+    async function loadMaterials() {
+      const r = await fetch('/api/materials');
+      materials = await r.json(); // [{name,url,text}]
+      materials.forEach(m => m.selected = false);
+      renderRows();
+    }
 
-  function cmtRow(name){
-    const row = document.createElement('div'); row.className='row';
-    const lab = document.createElement('div'); lab.textContent = name;
-    const ta  = document.createElement('textarea'); ta.placeholder='（空ならランダムテキストから自動）';
-    ta.value = commentMap[name] || '';
-    ta.oninput = ()=>{ commentMap[name] = ta.value; }
-    row.appendChild(lab); row.appendChild(ta);
-    return row;
-  }
-
-  function renderMaterials(){
-    materialsBox.innerHTML=''; commentList.innerHTML='';
-    MATERIALS.forEach(name=>{
-      materialsBox.appendChild(matRow(name));
-      commentList.appendChild(cmtRow(name));
-    });
-  }
-  renderMaterials();
-
-  // ---- アップロード ----
-  document.getElementById('btnUpload').onclick = async () => {
-    const inp = document.getElementById('fileInput');
-    if(!inp.files.length) return;
-    const fd = new FormData();
-    for(const f of inp.files){ fd.append('files[]', f, f.name); }
-    try{
-      const res = await fetch('/upload', {method:'POST', body: fd});
-      const text = await res.text();
-      let data; try{ data = JSON.parse(text); }catch{ data = {ok:false, error:`HTTP ${res.status}: ${text.slice(0,200)}`} }
-      if(data.ok){
-        MATERIALS = data.materials || [];
-        MATERIALS.forEach(m=>{ if(!(m in commentMap)) commentMap[m]=''; });
-        renderMaterials();
-      }else{
-        alert('アップロード失敗: '+(data.error||''));
+    function renderRows() {
+      bodyEl.innerHTML = '';
+      if (!materials.length) {
+        bodyEl.appendChild(emptyEl);
+        emptyEl.style.display='table-row';
+        return;
       }
-    }catch(e){
-      alert('アップロード失敗: '+e);
+      emptyEl.style.display='none';
+      materials.forEach((m, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = 'row';
+        tr.dataset.name = m.name;
+
+        // check
+        const td0 = document.createElement('td');
+        const ck = document.createElement('input');
+        ck.type='checkbox'; ck.className='check';
+        ck.checked = !!m.selected;
+        ck.addEventListener('change', ()=>m.selected = ck.checked);
+        td0.appendChild(ck);
+
+        // thumb
+        const td1 = document.createElement('td');
+        const img = document.createElement('img');
+        img.src = m.url; img.className = 'thumb';
+        img.ondblclick = ()=>window.open(m.url, '_blank');
+        td1.appendChild(img);
+
+        // filename（表示だけ）
+        const td2 = document.createElement('td');
+        td2.textContent = m.name;
+
+        // text
+        const td3 = document.createElement('td');
+        const inp = document.createElement('input');
+        inp.type='text'; inp.value = m.text||''; inp.style.width='100%';
+        inp.placeholder='空ならランダム';
+        inp.addEventListener('change', async()=>{
+          m.text = inp.value;
+          await fetch('/api/update_text', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ name: m.name, text: m.text })
+          });
+        });
+        // 右列ダブルクリックでも編集開始
+        td3.ondblclick = ()=>{ inp.focus(); inp.select(); };
+        td3.appendChild(inp);
+
+        tr.append(td0, td1, td2, td3);
+        bodyEl.appendChild(tr);
+      });
     }
-  };
 
-  // ---- 投稿 ----
-  function selectedMaterials(){
-    return [...materialsBox.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);
-  }
-
-  async function publish(materials){
-    const account_no = parseInt(accountSelect.value||'0',10);
-    const share_to_feed = document.getElementById('shareToFeed').checked;
-    const comments = {};
-    materials.forEach(m => comments[m] = (commentMap[m]||''));
-    const payload = { account_no, share_to_feed, comments };
-    if(materials.length) payload.materials = materials;
-
-    const res = await fetch('/api/publish', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const text = await res.text();
-    let data; try{ data = JSON.parse(text); }catch{ data = {ok:false, error:`HTTP ${res.status}: ${text.slice(0,200)}`} }
-    return data;
-  }
-
-  const logBox = document.getElementById('logBox');
-
-  document.getElementById('btnPostSelected').onclick = async () => {
-    const mats = selectedMaterials();
-    const data = await publish(mats);
-    logBox.textContent = JSON.stringify(data, null, 2);
-    tabs.forEach(x=>x.classList.remove('active')); panes.forEach(p=>p.classList.add('hidden'));
-    document.querySelector('.tab[data-tab="tab-logs"]').classList.add('active');
-    document.getElementById('tab-logs').classList.remove('hidden');
-  };
-
-  document.getElementById('btnPostAll').onclick = async () => {
-    const data = await publish([]); // 空→サーバ側で全素材
-    logBox.textContent = JSON.stringify(data, null, 2);
-    tabs.forEach(x=>x.classList.remove('active')); panes.forEach(p=>p.classList.add('hidden'));
-    document.querySelector('.tab[data-tab="tab-logs"]').classList.add('active');
-    document.getElementById('tab-logs').classList.remove('hidden');
-  };
-
-  // ---- ランダムテキスト保存 ----
-  document.getElementById('btnSaveRandom').onclick = async () => {
-    const texts = document.getElementById('randomTexts').value || '';
-    try{
-      const res = await fetch('/api/random_texts/save',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({texts})});
-      const data = await res.json();
-      document.getElementById('randStatus').textContent = data.ok ? '保存OK' : ('保存失敗: '+(data.error||''));
-    }catch(e){
-      document.getElementById('randStatus').textContent = '保存失敗: '+e;
+    function makeSortable() {
+      new Sortable(bodyEl, {
+        animation: 150,
+        handle: '.row',
+        onEnd: async () => {
+          const order = [...bodyEl.querySelectorAll('tr.row')].map(tr=>tr.dataset.name);
+          await fetch('/api/update_order', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ order })
+          });
+        }
+      });
     }
-  };
-</script>
+
+    function wireToolbar() {
+      document.getElementById('fileInput').addEventListener('change', async (e) => {
+        const files = e.target.files;
+        if (!files || !files.length) return;
+        const fd = new FormData();
+        for (const f of files) fd.append('files', f);
+        const r = await fetch('/api/upload', { method:'POST', body: fd });
+        if (!r.ok) { alert('アップロード失敗'); return; }
+        await loadMaterials();
+        e.target.value='';
+      });
+
+      document.getElementById('removeSelected').addEventListener('click', async ()=>{
+        const names = materials.filter(m=>m.selected).map(m=>m.name);
+        if (!names.length) { alert('削除する素材をチェックしてください'); return; }
+        if (!confirm(`${names.length}件を削除しますか？`)) return;
+        const r = await fetch('/api/remove', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ names })
+        });
+        if (!r.ok) { alert('削除に失敗'); return; }
+        await loadMaterials();
+      });
+
+      document.getElementById('reload').addEventListener('click', async ()=>{
+        await loadMaterials();
+      });
+
+      document.getElementById('doPost').addEventListener('click', async ()=>{
+        const account_no = Number(accountNoEl.value||1);
+        const all = document.getElementById('allAccounts').checked;
+        const selected = materials.filter(m=>m.selected).map(m=>m.name);
+        const body = { account_no, all_accounts: all, selected_names: selected };
+        setBar(5);
+        const r = await fetch('/api/post', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        const txt = await r.text();
+        if (r.headers.get('content-type')?.includes('application/json')) {
+          const data = JSON.parse(txt);
+          alert(data.message || '完了');
+        } else {
+          // 何かの例外をそのまま返してる場合
+          alert(txt);
+        }
+        setBar(100);
+        setTimeout(()=>setBar(0), 800);
+      });
+
+      // 飾りボタン（ルーティンは既存のAPIに繋ぐなら差替）
+      document.getElementById('tokenRefresh').onclick = ()=>window.location.href='/tokens/refresh';
+      document.getElementById('tokenCheck').onclick = ()=>window.location.href='/tokens/status';
+      document.getElementById('tokenRevoke').onclick = ()=>window.location.href='/tokens/revoke';
+    }
+
+    function setBar(p){ document.getElementById('progBar').style.width = `${p}%`; }
+  </script>
 </body>
 </html>
