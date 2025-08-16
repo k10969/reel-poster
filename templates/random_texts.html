@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ランダムテキスト編集</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#f2f3f5}
+  .toolbar{display:flex;gap:12px;align-items:center;padding:10px 14px;background:#3b3f45;color:#fff}
+  .tab{padding:6px 10px;border-radius:6px;cursor:pointer}
+  .tab.active{background:#02a4ff}
+  .wrap{max-width:900px;margin:18px auto;background:#fff;border:1px solid #ddd;border-radius:8px}
+  .hd{padding:10px 12px;border-bottom:1px solid #eee;font-weight:600}
+  .bd{padding:12px}
+  textarea{width:100%;height:60vh;border:1px solid #ccc;border-radius:8px;padding:10px;font-family:ui-monospace,Menlo,monospace}
+  button{padding:8px 12px;border:1px solid #02a4ff;border-radius:6px;background:#02a4ff;color:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <div class="tab" onclick="location.href='/'">投稿</div>
+  <div class="tab active">ランダムテキスト</div>
+  <div class="tab" onclick="alert('投稿ログは後で実装できます')">投稿ログ</div>
+</div>
+<div class="wrap">
+  <div class="hd">random_texts.txt（1行=1テキスト）</div>
+  <div class="bd">
+    <form method="post">
+      <textarea name="content">{{ content|e }}</textarea>
+      <div style="margin-top:10px;text-align:right">
+        <button>保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+</body>
+</html>
+

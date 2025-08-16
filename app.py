@@ -15,6 +15,49 @@ from moviepy.editor import VideoFileClip, CompositeVideoClip, ImageClip, vfx
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np  # ImageClip(PIL画像)を確実に通すため
 
+# ==== アカウント保存（UI用。GraphAPIは未接続） ====
+ACCOUNTS_JSON = BASE_DIR / "accounts.json"
+
+def _load_accounts():
+    if ACCOUNTS_JSON.exists():
+        try:
+            return json.loads(ACCOUNTS_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"accounts": []}
+
+def _save_accounts(obj):
+    ACCOUNTS_JSON.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+@app.route("/accounts", methods=["GET"])
+def accounts_list():
+    return _load_accounts()
+
+@app.route("/accounts/upsert", methods=["POST"])
+def accounts_upsert():
+    data = request.get_json(silent=True) or {}
+    no = str(data.get("no","")).strip()
+    if not no:
+        return {"ok": False, "error": "no required"}, 400
+    accs = _load_accounts()
+    # 既存置き換え or 追加
+    found = False
+    for a in accs["accounts"]:
+        if str(a.get("no","")) == no:
+            a.update({
+                "no": no,
+                "label": data.get("label",""),
+                "ig_user_id": data.get("ig_user_id",""),
+                "page_id": data.get("page_id","")
+            })
+            found = True
+            break
+    if not found:
+        accs["accounts"].append({
+            "no": no,
+            "label": data.get("label",""),
+            "ig_user_id
+
 # ========= 基本設定 =========
 BASE_DIR = Path(__file__).parent.resolve()
 STATIC_DIR = BASE_DIR / "static"
@@ -42,6 +85,15 @@ DISABLE_THUMBS = os.getenv("DISABLE_THUMBS") == "1"
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512MB
+
+@app.route("/random_texts", methods=["GET", "POST"])
+def random_texts():
+    if request.method == "POST":
+        txt = request.form.get("content","")
+        RANDOM_TXT.write_text(txt, encoding="utf-8")
+        return redirect(url_for("random_texts"))
+    content = RANDOM_TXT.read_text(encoding="utf-8") if RANDOM_TXT.exists() else ""
+    return render_template("random_texts.html", content=content)
 
 # ========= ユーティリティ =========
 def is_allowed(filename: str) -> bool:
