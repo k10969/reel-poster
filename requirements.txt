@@ -1,7 +1,7 @@
 flask==2.2.5
 gunicorn==20.1.0
 
-# ↓ MoviePy 1.0.3 時代の安定セット
+# MoviePy 1.0.3 安定セット
 moviepy==1.0.3
 imageio==2.9.0
 imageio-ffmpeg==0.4.2

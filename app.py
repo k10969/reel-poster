@@ -1,5 +1,6 @@
 import os
 import time
+import json
 from pathlib import Path
 from typing import Tuple
 
@@ -9,8 +10,10 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
+# MoviePy 1.0.3 互換
 from moviepy.editor import VideoFileClip, CompositeVideoClip, ImageClip, vfx
 from PIL import Image, ImageDraw, ImageFont
+import numpy as np  # ImageClip(PIL画像)を確実に通すため
 
 # ========= 基本設定 =========
 BASE_DIR = Path(__file__).parent.resolve()
@@ -21,6 +24,9 @@ THUMB_DIR = STATIC_DIR / "thumbs"
 OUTPUT_DIR = STATIC_DIR / "output"
 RANDOM_TXT = BASE_DIR / "random_texts.txt"
 
+MATERIALS_ORDER = BASE_DIR / "materials_order.json"      # ["a.jpg","b.mp4",...]
+MATERIAL_OVERRIDES = BASE_DIR / "material_overrides.json"  # {"a.jpg":{"text":"..."}}
+
 ALLOWED_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -28,9 +34,11 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 for p in (BACKGROUND_DIR, OVERLAY_DIR, THUMB_DIR, OUTPUT_DIR):
     p.mkdir(parents=True, exist_ok=True)
 
-# 初回 random_texts.txt がなければ作成
 if not RANDOM_TXT.exists():
     RANDOM_TXT.write_text("やばい\nおもしろすぎる\nこれすごい\n", encoding="utf-8")
+
+# サムネを重い環境で無効化したい時は DISABLE_THUMBS=1 を環境変数に
+DISABLE_THUMBS = os.getenv("DISABLE_THUMBS") == "1"
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512MB
@@ -67,6 +75,7 @@ def ensure_thumbnail(src_path: Path, thumb_path: Path, width: int = 320) -> None
 def safe_join(folder: Path, filename: str) -> Path:
     name = secure_filename(filename)
     p = folder / name
+    # Path.is_relative_to は 3.9+ で可
     if not p.resolve().is_relative_to(folder.resolve()):
         abort(400)
     return p
@@ -106,6 +115,17 @@ def render_text_image(text: str, font_size: int = 64, color: str = "#ffffff",
               stroke_width=stroke_width, stroke_fill=stroke_color)
     return img
 
+def _load_json(p: Path, default):
+    try:
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return default
+
+def _save_json(p: Path, obj):
+    p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
 # ========= ルーティング =========
 @app.route("/")
 def index():
@@ -113,25 +133,40 @@ def index():
     ovs = list_files_sorted(OVERLAY_DIR)
     outs = list_files_sorted(OUTPUT_DIR)
 
+    # 背景
     bg_rows = []
     for name in bgs:
         src = BACKGROUND_DIR / name
         th = THUMB_DIR / f"bg__{name}.jpg"
         try:
-            ensure_thumbnail(src, th)
+            if not DISABLE_THUMBS:
+                ensure_thumbnail(src, th)
         except Exception:
             pass
         bg_rows.append((name, f"static/thumbs/{th.name}" if th.exists() else ""))
 
+    # 並び順＆テキスト上書き
+    order = _load_json(MATERIALS_ORDER, [])
+    overrides = _load_json(MATERIAL_OVERRIDES, {})  # {filename: {"text": "…"}}
+
+    ov_set = set(ovs)
+    ordered = [f for f in order if f in ov_set] + [f for f in ovs if f not in order]
+
     ov_rows = []
-    for name in ovs:
+    for name in ordered:
         src = OVERLAY_DIR / name
         th = THUMB_DIR / f"ov__{name}.jpg"
         try:
-            ensure_thumbnail(src, th)
+            if not DISABLE_THUMBS:
+                ensure_thumbnail(src, th)
         except Exception:
             pass
-        ov_rows.append((name, f"static/thumbs/{th.name}" if th.exists() else ""))
+        text_override = overrides.get(name, {}).get("text", "")
+        ov_rows.append({
+            "name": name,
+            "thumb": f"static/thumbs/{th.name}" if th.exists() else "",
+            "text": text_override
+        })
 
     outs_rows = outs
     return render_template("index.html", bg_rows=bg_rows, ov_rows=ov_rows, outs_rows=outs_rows)
@@ -149,9 +184,19 @@ def upload():
     folder = BACKGROUND_DIR if target == "backgrounds" else OVERLAY_DIR
     file.save(folder / fname)
     try:
-        ensure_thumbnail(folder / fname, THUMB_DIR / f"{'bg' if target=='backgrounds' else 'ov'}__{fname}.jpg")
+        prefix = "bg" if target == "backgrounds" else "ov"
+        if not DISABLE_THUMBS:
+            ensure_thumbnail(folder / fname, THUMB_DIR / f"{prefix}__{fname}.jpg")
     except Exception:
         pass
+
+    # 新規追加分を materials_order に足す（末尾）
+    if target != "backgrounds":
+        order = _load_json(MATERIALS_ORDER, [])
+        if fname not in order:
+            order.append(fname)
+            _save_json(MATERIALS_ORDER, order)
+
     return redirect(url_for("index"))
 
 @app.route("/preview/<kind>/<filename>")
@@ -168,6 +213,48 @@ def preview(kind: str, filename: str):
                            file_url=f"static/{kind}/{filename}",
                            is_video=is_video(filename))
 
+# 並び順＆テキストを保存
+@app.route("/materials/sync", methods=["POST"])
+def materials_sync():
+    data = request.get_json(silent=True) or {}
+    order = data.get("order", [])           # ["file1.jpg", ...]
+    texts = data.get("texts", {})           # {"file1.jpg": "テキスト", ...}
+
+    current = {f.name for f in OVERLAY_DIR.iterdir() if f.is_file() and is_allowed(f.name)}
+    cleaned_order = [f for f in order if f in current]
+    cleaned_texts = {k: {"text": (v or "").strip()} for k, v in texts.items() if k in current}
+
+    _save_json(MATERIALS_ORDER, cleaned_order)
+    overrides = _load_json(MATERIAL_OVERRIDES, {})
+    overrides.update(cleaned_texts)
+    _save_json(MATERIAL_OVERRIDES, overrides)
+
+    return {"ok": True, "count": len(cleaned_order)}
+
+# 素材削除
+@app.route("/materials/delete", methods=["POST"])
+def materials_delete():
+    filename = request.form.get("filename", "")
+    path = safe_join(OVERLAY_DIR, filename)
+    if not path.exists():
+        abort(404)
+
+    try:
+        path.unlink(missing_ok=True)
+        (THUMB_DIR / f"ov__{filename}.jpg").unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    order = _load_json(MATERIALS_ORDER, [])
+    order = [f for f in order if f != filename]
+    _save_json(MATERIALS_ORDER, order)
+
+    overrides = _load_json(MATERIAL_OVERRIDES, {})
+    overrides.pop(filename, None)
+    _save_json(MATERIAL_OVERRIDES, overrides)
+
+    return redirect(url_for("index"))
+
 @app.route("/combine", methods=["POST"])
 def combine():
     bg = request.form.get("background")
@@ -178,7 +265,7 @@ def combine():
     fadein = float(request.form.get("fadein", "0"))  # seconds
 
     text_enable = request.form.get("text_enable") == "on"
-    text_mode = request.form.get("text_mode", "random")  # random|custom
+    text_mode = request.form.get("text_mode", "custom")  # custom|random
     text_input = request.form.get("text_input", "")
     text_size = int(request.form.get("text_size", "64"))
     text_pos = request.form.get("text_pos", "top-left")
@@ -212,7 +299,12 @@ def combine():
                 }
                 return mapping.get(pos, mapping["top-right"])
 
-            if Path(ov_path).suffix.lower() in VIDEO_EXTS:
+            # 素材テキスト（上書き優先）
+            overrides = _load_json(MATERIAL_OVERRIDES, {})
+            override_text = overrides.get(ov_path.name, {}).get("text", "").strip()
+            candidate = (text_input or "").strip() or override_text
+
+            if ov_path.suffix.lower() in VIDEO_EXTS:
                 with VideoFileClip(str(ov_path)) as ov_clip:
                     overlay = ov_clip.resize(height=overlay_target) if ov_clip.w <= ov_clip.h else ov_clip.resize(width=overlay_target)
                     if fadein > 0:
@@ -228,22 +320,24 @@ def combine():
                     clips = [bg_clip.set_duration(final_dur), overlay.set_duration(final_dur)]
 
                     if text_enable:
-                        if text_mode == "custom" and text_input.strip():
-                            line = text_input.strip()
+                        if text_mode == "custom" and candidate:
+                            line = candidate
                         else:
                             lines = [s.strip() for s in RANDOM_TXT.read_text(encoding="utf-8").splitlines() if s.strip()]
                             line = lines[int(time.time()) % len(lines)] if lines else ""
                         if line:
                             img = render_text_image(line, font_size=text_size)
-                            txt_clip = ImageClip(img).set_duration(final_dur)
-                            tx, ty = pos_xy(txt_clip.w, txt_clip.h) if text_pos == "same" else calc_position(text_pos, bg_w, bg_h, txt_clip.w, txt_clip.h)
+                            txt_clip = ImageClip(np.array(img)).set_duration(final_dur)
+                            tx, ty = calc_position(text_pos, bg_w, bg_h, txt_clip.w, txt_clip.h)
                             txt_clip = txt_clip.set_position((tx, ty))
                             clips.append(txt_clip)
 
                     final = CompositeVideoClip(clips)
                     final.write_videofile(
-                        str(out_path), codec="libx264", audio_codec="aac",
-                        threads=4, fps=bg_clip.fps if bg_clip.fps else 30,
+                        str(out_path),
+                        codec="libx264", audio_codec="aac",
+                        threads=2,  # 省メモリ
+                        fps=bg_clip.fps if bg_clip.fps else 30,
                         preset="medium"
                     )
                     final.close()
@@ -263,22 +357,24 @@ def combine():
                 clips = [bg_clip.set_duration(final_dur), overlay]
 
                 if text_enable:
-                    if text_mode == "custom" and text_input.strip():
-                        line = text_input.strip()
+                    if text_mode == "custom" and candidate:
+                        line = candidate
                     else:
                         lines = [s.strip() for s in RANDOM_TXT.read_text(encoding="utf-8").splitlines() if s.strip()]
                         line = lines[int(time.time()) % len(lines)] if lines else ""
                     if line:
                         img = render_text_image(line, font_size=text_size)
-                        txt_clip = ImageClip(img).set_duration(final_dur)
+                        txt_clip = ImageClip(np.array(img)).set_duration(final_dur)
                         tx, ty = calc_position(text_pos, bg_w, bg_h, txt_clip.w, txt_clip.h)
                         txt_clip = txt_clip.set_position((tx, ty))
                         clips.append(txt_clip)
 
                 final = CompositeVideoClip(clips)
                 final.write_videofile(
-                    str(out_path), codec="libx264", audio_codec="aac",
-                    threads=4, fps=bg_clip.fps if bg_clip.fps else 30,
+                    str(out_path),
+                    codec="libx264", audio_codec="aac",
+                    threads=2,
+                    fps=bg_clip.fps if bg_clip.fps else 30,
                     preset="medium"
                 )
                 final.close()
@@ -303,4 +399,6 @@ def static_passthrough(subpath: str):
     return send_from_directory(STATIC_DIR, subpath)
 
 if __name__ == "__main__":
+    # ローカル実行用
     app.run(host="0.0.0.0", port=5000, debug=True)
+

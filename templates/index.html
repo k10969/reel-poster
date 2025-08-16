@@ -2,193 +2,246 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>Reel Generator（Web版）</title>
+  <title>Reel Generator（テーブル/DnD版）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     *{box-sizing:border-box}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:24px}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:24px;background:#fafafa}
     h1{margin:0 0 12px}
-    .section{max-width:1080px;margin:0 auto}
+    .section{max-width:1200px;margin:0 auto}
     .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:16px 0;background:#fff}
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
-    .item{border:1px solid #eee;border-radius:10px;padding:10px}
-    .thumb{width:100%;height:140px;object-fit:cover;border-radius:8px;border:1px solid #eee;cursor:pointer}
     .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .muted{color:#666;font-size:12px}
-    label{display:inline-flex;align-items:center;gap:6px}
-    input[type=file],select,button,input[type=number],input[type=text]{padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fafafa}
+    input[type=file],select,button,input[type=text]{padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff}
     button{cursor:pointer}
     button:hover{background:#f0f0f0}
-    video{width:100%;max-height:140px;border-radius:8px;border:1px solid #eee}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #eee;padding:10px;vertical-align:middle}
+    tr.dragging{opacity:.6}
+    .thumb{width:90px;height:90px;object-fit:cover;border:1px solid #eee;border-radius:8px;cursor:pointer}
+    .filename{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px}
     .pill{font-size:12px;padding:2px 8px;border:1px solid #ddd;border-radius:999px}
+    .right{display:flex;gap:8px;justify-content:flex-end}
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
-  <div class="section">
-    <h1>Reel Generator（今のツール仕様をWeb化）</h1>
+<div class="section">
+  <h1>Instagram リール準備（素材一覧 / 並べ替え / テキスト編集）</h1>
 
-    <div class="card">
-      <h2>背景（backgrounds）</h2>
+  <div class="card">
+    <div class="row">
       <form action="/upload?target=backgrounds" method="post" enctype="multipart/form-data" class="row">
+        <label class="pill">背景</label>
         <input type="file" name="file" accept="video/*" required>
         <button>アップロード</button>
-        <span class="muted">* 例: background1.mp4 など</span>
       </form>
-      <div class="grid" style="margin-top:12px;">
-        {% if bg_rows|length == 0 %}
-          <div class="muted">static/backgrounds に動画を入れてください</div>
-        {% endif %}
-        {% for name, thumb in bg_rows %}
-          <div class="item">
-            {% if thumb %}
-              <img class="thumb" src="/{{ thumb }}" alt="thumb" onclick="location.href='{{ url_for('preview', kind='backgrounds', filename=name) }}'">
-            {% else %}
-              <video muted playsinline preload="metadata" src="{{ url_for('static_passthrough', subpath='backgrounds/' ~ name) }}"></video>
-            {% endif %}
-            <div class="row" style="margin-top:6px;">
-              <span class="pill">背景</span>
-              <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ name }}</div>
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
 
-    <div class="card">
-      <h2>素材（overlay_input）</h2>
-      <form action="/upload?target=overlay" method="post" enctype="multipart/form-data" class="row">
+      <form action="/upload?target=overlay" method="post" enctype="multipart/form-data" class="row" style="margin-left:auto">
+        <label class="pill">素材</label>
         <input type="file" name="file" accept="video/*,image/*" required>
-        <button>アップロード</button>
-        <span class="muted">画像/動画どちらもOK（iPhoneからアップ可）</span>
+        <button>素材追加</button>
       </form>
-      <div class="grid" style="margin-top:12px;">
-        {% if ov_rows|length == 0 %}
-          <div class="muted">static/overlay_input に素材を追加してください</div>
-        {% endif %}
-        {% for name, thumb in ov_rows %}
-          <div class="item">
-            {% if thumb %}
-              <img class="thumb" src="/{{ thumb }}" alt="thumb" onclick="location.href='{{ url_for('preview', kind='overlay_input', filename=name) }}'">
-            {% else %}
-              <div class="muted" style="height:140px;display:flex;align-items:center;justify-content:center;border:1px dashed #ccc;border-radius:8px;">サムネなし</div>
-            {% endif %}
-            <div class="row" style="margin-top:6px;">
-              <span class="pill">素材</span>
-              <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ name }}</div>
-              <button onclick="location.href='{{ url_for('preview', kind='overlay_input', filename=name) }}'">プレビュー/合成</button>
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>生成結果（output）</h2>
-      <div class="grid">
-        {% for out in outs_rows %}
-          <div class="item">
-            <video controls playsinline preload="metadata" src="{{ url_for('static_passthrough', subpath='output/' ~ out) }}"></video>
-            <div class="row" style="margin-top:6px;">
-              <div class="muted" style="flex:1">{{ out }}</div>
-              <button onclick="location.href='{{ url_for('download_output', filename=out) }}'">ダウンロード</button>
-            </div>
-          </div>
-        {% endfor %}
-        {% if outs_rows|length == 0 %}
-          <div class="muted">まだ生成物がありません。下の「合成」で作成してください。</div>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>合成（今のツールの挙動）</h2>
-      <form action="/combine" method="post" class="row" style="gap:16px;align-items:flex-end;">
-        <div>
-          <label>背景
-            <select name="background" required>
-              {% for name, _ in bg_rows %}
-                <option value="{{ name }}">{{ name }}</option>
-              {% endfor %}
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>素材
-            <select name="overlay" required>
-              {% for name, _ in ov_rows %}
-                <option value="{{ name }}">{{ name }}</option>
-              {% endfor %}
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>位置
-            <select name="pos">
-              <option value="top-right">右上</option>
-              <option value="top-left">左上</option>
-              <option value="bottom-right">右下</option>
-              <option value="bottom-left">左下</option>
-              <option value="center">中央</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>サイズ(%)
-            <input type="number" name="size_pct" min="10" max="90" value="50" style="width:90px">
-          </label>
-        </div>
-        <div>
-          <label>長さ
-            <select name="duration_mode">
-              <option value="shortest">短い方に合わせる</option>
-              <option value="background">背景に合わせる</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>フェードイン(s)
-            <input type="number" name="fadein" min="0" max="5" value="0" step="0.1" style="width:90px">
-          </label>
-        </div>
-        <div style="width:100%"></div>
-        <div>
-          <label><input type="checkbox" name="text_enable"> ランダムテキストを重ねる</label>
-        </div>
-        <div>
-          <label>テキストモード
-            <select name="text_mode">
-              <option value="random">random_texts.txt からランダム</option>
-              <option value="custom">下の入力を使う</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>テキスト入力
-            <input type="text" name="text_input" placeholder="custom選択時のみ有効" style="width:240px">
-          </label>
-        </div>
-        <div>
-          <label>テキスト位置
-            <select name="text_pos">
-              <option value="top-left">左上</option>
-              <option value="top-right">右上</option>
-              <option value="bottom-left">左下</option>
-              <option value="bottom-right">右下</option>
-              <option value="center">中央</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>テキストサイズ
-            <input type="number" name="text_size" min="24" max="128" value="64" style="width:90px">
-          </label>
-        </div>
-        <div>
-          <button type="submit">選択生成</button>
-        </div>
-      </form>
-      <div class="muted" style="margin-top:8px;">random_texts.txt を編集すると内容が反映されます（プロジェクト直下）。</div>
     </div>
   </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">overlay_input の素材一覧（行DnD=順序変更 / サムネダブルクリック=拡大）</h2>
+      <div class="right">
+        <button id="saveBtn">更新（順序・テキスト保存）</button>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px;"></th>
+          <th style="width:120px;">サムネ</th>
+          <th>ファイル名</th>
+          <th style="width:40%;">テキスト（空ならランダム）</th>
+          <th style="width:160px;"></th>
+        </tr>
+      </thead>
+      <tbody id="ovTable">
+        {% if ov_rows|length == 0 %}
+          <tr><td></td><td colspan="4" class="muted">素材がありません。右上の「素材追加」で画像/動画をアップしてください。</td></tr>
+        {% endif %}
+
+        {% for item in ov_rows %}
+        <tr data-fname="{{ item.name }}">
+          <td class="handle">☰</td>
+          <td>
+            {% if item.thumb %}
+              <img class="thumb" src="/{{ item.thumb }}" ondblclick="location.href='{{ url_for('preview', kind='overlay_input', filename=item.name) }}'">
+            {% else %}
+              <div class="muted" style="width:90px;height:90px;border:1px dashed #ccc;border-radius:8px;display:flex;align-items:center;justify-content:center">N/A</div>
+            {% endif %}
+          </td>
+          <td class="filename">{{ item.name }}</td>
+          <td>
+            <input type="text" class="txt" value="{{ item.text|e }}" placeholder="空なら random_texts.txt からランダム">
+          </td>
+          <td class="right">
+            <button type="button" onclick="combineOne('{{ item.name|e }}')">この素材で合成</button>
+            <form action="/materials/delete" method="post" style="margin:0">
+              <input type="hidden" name="filename" value="{{ item.name|e }}">
+              <button type="submit" onclick="return confirm('削除しますか？')">削除</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="muted" style="margin-top:8px;">
+      ※ 合成の背景・サイズ・位置などは下のパネルで設定。テキスト欄に値がある素材はそのまま使われ、空欄はランダム。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 12px">合成（背景/位置/サイズなど）</h2>
+    <form action="/combine" method="post" class="row" style="gap:16px;align-items:flex-end;">
+      <div>
+        <label>背景
+          <select name="background" required>
+            {% for name, _ in bg_rows %}
+              <option value="{{ name }}">{{ name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div>
+        <label>素材
+          <select id="overlaySelect" name="overlay" required>
+            {% for item in ov_rows %}
+              <option value="{{ item.name }}">{{ item.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div>
+        <label>位置
+          <select name="pos">
+            <option value="top-right">右上</option>
+            <option value="top-left">左上</option>
+            <option value="bottom-right">右下</option>
+            <option value="bottom-left">左下</option>
+            <option value="center">中央</option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <label>サイズ(%)
+          <input type="number" name="size_pct" min="10" max="90" value="50" style="width:90px">
+        </label>
+      </div>
+      <div>
+        <label>長さ
+          <select name="duration_mode">
+            <option value="shortest">短い方に合わせる</option>
+            <option value="background">背景に合わせる</option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <label>フェードイン(s)
+          <input type="number" name="fadein" min="0" max="5" value="0" step="0.1" style="width:90px">
+        </label>
+      </div>
+      <div style="width:100%"></div>
+      <div><label><input type="checkbox" name="text_enable" checked> テキスト重ねる</label></div>
+      <div>
+        <label>テキストモード
+          <select name="text_mode">
+            <option value="custom">素材のテキスト/入力を使う</option>
+            <option value="random">ランダム</option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <label>（任意）テキスト入力
+          <input type="text" name="text_input" placeholder="この入力が最優先されます" style="width:240px">
+        </label>
+      </div>
+      <div>
+        <label>テキスト位置
+          <select name="text_pos">
+            <option value="top-left">左上</option>
+            <option value="top-right">右上</option>
+            <option value="bottom-left">左下</option>
+            <option value="bottom-right">右下</option>
+            <option value="center">中央</option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <label>テキストサイズ
+          <input type="number" name="text_size" min="24" max="128" value="64" style="width:90px">
+        </label>
+      </div>
+      <div><button type="submit">選択生成</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 12px">生成結果（output）</h2>
+    <div class="row" style="flex-wrap:wrap;gap:16px">
+      {% for out in outs_rows %}
+        <div style="width:320px">
+          <video controls playsinline preload="metadata" src="{{ url_for('static_passthrough', subpath='output/' ~ out) }}" style="width:100%;border:1px solid #eee;border-radius:8px"></video>
+          <div class="row" style="justify-content:space-between">
+            <div class="muted" style="font-size:12px">{{ out }}</div>
+            <button onclick="location.href='{{ url_for('download_output', filename=out) }}'">DL</button>
+          </div>
+        </div>
+      {% endfor %}
+      {% if outs_rows|length == 0 %}
+        <div class="muted">まだ生成物がありません。</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+  // DnD 並べ替え
+  new Sortable(document.getElementById('ovTable'), {
+    animation: 150,
+    handle: '.handle',
+    ghostClass: 'dragging'
+  });
+
+  // 保存（順序 + テキスト）
+  document.getElementById('saveBtn').onclick = async () => {
+    const rows = [...document.querySelectorAll('#ovTable tr[data-fname]')];
+    const order = rows.map(r => r.dataset.fname);
+    const texts = {};
+    rows.forEach(r => {
+      const fname = r.dataset.fname;
+      const val = r.querySelector('input.txt').value;
+      texts[fname] = val;
+    });
+
+    const res = await fetch('/materials/sync', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({order, texts})
+    });
+    if (res.ok) {
+      alert('更新しました');
+      // 合成セレクトも反映
+      const sel = document.getElementById('overlaySelect');
+      sel.innerHTML = order.map(f => `<option>${f}</option>`).join('');
+    } else {
+      alert('保存に失敗しました');
+    }
+  };
+
+  // 行の「この素材で合成」→ 合成フォームの素材選択に反映
+  function combineOne(name){
+    const sel = document.getElementById('overlaySelect');
+    [...sel.options].forEach(o => { if(o.value===name) o.selected=true; });
+    window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
+  }
+</script>
 </body>
 </html>
