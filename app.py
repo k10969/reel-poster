@@ -1,40 +1,36 @@
-# ===== app.py の先頭に貼る（絶対に落ちないインポートガード）=====
+# ===== import guard (TOP of app.py) =====
 from flask import Flask, Response
 import traceback
 
-app = Flask(__name__)  # ← まず Flask インスタンスを公開しておく（WSGIが拾える）
+app = Flask(__name__)  # 先に公開しておく（WSGIが拾える）
 
 _APP_IMPORT_ERR = None
 try:
-    # ↓↓↓ ここに “今まで app.py の先頭にあった import” を移動する ↓↓↓
-    # 例:
-    # import os, json
-    # from pathlib import Path
-    # from moviepy.editor import VideoFileClip
-    # from settings_store import load_accounts, save_accounts, ...
-    # from poster_core_reel import PosterCoreReel
-    # …（あなたの既存の import 群を全部ここへ）
-    # ===== ここまでガード =====# poster_core_reel.py  — Python 3.9 互換
-    import os
-    import random
-    import logging
-    from flask import Flask
-    app = Flask(__name__)
-    from logging.handlers import RotatingFileHandler
+    # ←← ここに通常の import を並べる（例：あなたの実際の import 群に置き換えてOK）
+    import os, json, logging, random
     from pathlib import Path
+    from logging.handlers import RotatingFileHandler
     from typing import Optional, List, Dict
 
     import numpy as np
     from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
     from PIL import Image, ImageDraw, ImageFont
-        pass
-    except Exception as e:
-    # ここに来たら “app.py の import 中” に失敗してる
+
+    from settings_store import (
+        load_accounts, save_accounts,
+        load_overrides, save_overrides,
+        load_materials_order, save_materials_order,
+        load_random_texts, save_random_texts,
+    )
+    from poster_core_reel import PosterCoreReel
+    from cloudinary_uploader import upload_video_get_urls
+    import poster_core_reel_graph_accounts as igpub
+
+except Exception as e:
     _APP_IMPORT_ERR = "app.py import failed:\n" + "".join(
         traceback.format_exception(type(e), e, e.__traceback__)
     )
 
-# 失敗時は 500 と詳細を返す（起動自体は成功するので WSGIエラーは出ない）
 if _APP_IMPORT_ERR:
     @app.get("/")
     def _app_import_failed_root():
@@ -43,6 +39,7 @@ if _APP_IMPORT_ERR:
     @app.get("/__app_error")
     def _app_error():
         return Response(_APP_IMPORT_ERR, mimetype="text/plain", status=500)
+# ===== end guard =====
 
     # 以降の本体ルート定義は “何もしない” でOK（import が通ってないので動かせないため）
 
