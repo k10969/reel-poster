@@ -40,7 +40,17 @@ if _APP_IMPORT_ERR:
     def _app_error():
         return Response(_APP_IMPORT_ERR, mimetype="text/plain", status=500)
 # ===== end guard =====
+# ---- 必須ルート ----
+    from flask import render_template, jsonify
 
+@app.get("/health")
+    def health():
+        return jsonify(ok=True)
+
+@app.get("/")
+def root():
+    # テンプレートがある前提（templates/index.html）
+    return render_template("index.html")
     # 以降の本体ルート定義は “何もしない” でOK（import が通ってないので動かせないため）
 
 # 依存の存在チェック（どこで落ちたか見えるように）
