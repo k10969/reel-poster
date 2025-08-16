@@ -1,125 +1,113 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<title>Instagram リール投稿ツール（分散投稿 / 行内テキスト / DnD移動 / 並べ替え）</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8" />
+<title>Instagram リール投稿ツール（GUI準拠・シンプル）</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   *{box-sizing:border-box}
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#f2f3f5}
-  .toolbar{display:flex;gap:12px;align-items:center;padding:10px 14px;background:#3b3f45;color:#fff}
-  .tab{padding:6px 10px;border-radius:6px;cursor:pointer}
-  .tab.active{background:#02a4ff}
-  .wrap{max-width:1240px;margin:18px auto;padding:0 16px}
-  .panel{background:#fff;border:1px solid #ddd;border-radius:8px;margin-bottom:14px}
-  .panel-hd{padding:10px 12px;border-bottom:1px solid #eee;font-weight:600}
+  body{margin:0;background:#f6f7f9;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1200px;margin:0 auto;padding:10px}
+  .toolbar{display:flex;gap:10px;align-items:center;padding:10px 12px;background:#2f343d;color:#fff}
+  .toolbar .tab{padding:6px 10px;border-radius:8px;cursor:pointer}
+  .toolbar .tab.active{background:#0ea5ff}
+  .right{margin-left:auto;display:flex;gap:8px}
+  .panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;margin-top:10px}
+  .panel-hd{padding:10px 12px;border-bottom:1px solid #eef1f5;font-weight:600}
   .panel-bd{padding:12px}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  .grow{flex:1}
-  input[type=text]{padding:6px 8px;border:1px solid #ccc;border-radius:6px;background:#fff}
-  select,button{padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer}
-  button.primary{background:#02a4ff;border-color:#02a4ff;color:#fff}
-  button.danger{background:#ff4757;border-color:#ff4757;color:#fff}
-  .switch{display:inline-flex;align-items:center;gap:6px}
-  .switch input{transform:scale(1.1)}
+  input[type=text],select,textarea{border:1px solid #cbd5e1;border-radius:8px;padding:8px;background:#fff}
+  button{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;background:#fff;cursor:pointer}
+  button.primary{background:#0ea5ff;border-color:#0ea5ff;color:#fff}
+  button.danger{background:#ef4444;border-color:#ef4444;color:#fff}
+  .muted{color:#64748b;font-size:12px}
   table{width:100%;border-collapse:collapse}
-  th,td{border-bottom:1px solid #eee;padding:8px;vertical-align:middle}
-  .thumb{width:90px;height:90px;object-fit:cover;border:1px solid #eee;border-radius:6px}
-  .handle{cursor:grab;font-size:18px;color:#999;width:28px;text-align:center}
-  .filename{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px}
-  .muted{color:#666;font-size:12px}
-  .footer{padding:10px 12px;border-top:1px solid #eee;background:#fafafa;border-radius:0 0 8px 8px}
-  .progress{height:10px;background:#eee;border-radius:999px;overflow:hidden}
-  .bar{height:100%;background:#02a4ff;width:0%}
-  .right{margin-left:auto;display:flex;gap:8px}
+  th,td{border-bottom:1px solid #eef1f5;padding:8px;vertical-align:middle}
+  .thumb{width:110px;height:110px;object-fit:cover;border:1px solid #eef1f5;border-radius:8px;background:#fafafa}
+  .handle{cursor:grab;text-align:center;width:28px;color:#94a3b8;font-size:18px}
+  .note{font-size:12px;color:#334155;background:#fff8c4;border:1px solid #ffe58f;padding:6px 8px;border-radius:8px}
+  .hidden{display:none}
+  .rowbtns{display:flex;gap:8px;justify-content:flex-end}
+  tr.selected{background:#f0f9ff}
+  .grow{flex:1}
+  .progress{height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden}
+  .bar{height:100%;background:#0ea5ff;width:0%}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
 
-<!-- 上部ツールバー -->
+<!-- ヘッダー -->
 <div class="toolbar">
-  <div class="tab active" onclick="0">投稿</div>
-  <div class="tab" onclick="location.href='/random_texts'">ランダムテキスト</div>
-  <div class="tab" onclick="alert('投稿ログは後で実装できます')">投稿ログ</div>
+  <div class="tab active" id="tabPost">投稿</div>
+  <div class="tab" id="tabRand">ランダムテキスト</div>
+  <div class="tab" id="tabLog">投稿ログ</div>
   <div class="right">
-    <button class="primary" onclick="startBatch()">投稿実行</button>
+    <button class="primary" onclick="postSelected()">選択した素材を投稿</button>
+    <button onclick="postBatch()">並び順で全部投稿</button>
   </div>
 </div>
 
 <div class="wrap">
 
-  <!-- アカウント管理 -->
-  <div class="panel">
-    <div class="panel-hd">アカウント選択</div>
+  <!-- アカウント -->
+  <div class="panel" id="panelPost">
     <div class="panel-bd">
       <div class="row">
-        <div class="row">
-          <label>番号</label><input id="accNo" type="text" style="width:90px">
-          <label>ラベル</label><input id="accLabel" type="text" style="width:140px">
-          <label>IGユーザーID</label><input id="accIG" type="text" style="width:220px">
-          <label>ページID</label><input id="accPage" type="text" style="width:220px">
-          <label>Access Token</label><input id="accToken" type="text" style="width:320px" placeholder="EAAG...">
-        </div>
+        <label>番号</label><input id="accNo" type="text" style="width:80px">
+        <label>ラベル</label><input id="accLabel" type="text" style="width:140px">
+        <label>IGユーザーID</label><input id="accIG" type="text" style="width:220px">
+        <label>ページID</label><input id="accPage" type="text" style="width:220px">
+        <label>Access Token</label><input id="accToken" type="text" style="width:320px" placeholder="EAAG...">
         <button class="primary" onclick="upsertAcc()">+追加/更新</button>
         <button onclick="tokenRefresh()">トークン更新</button>
-        <button onclick="tokenCheck()">トークン有効期限チェック</button>
+        <button onclick="tokenCheck()">有効期限チェック</button>
         <button class="danger" onclick="delAcc()">削除</button>
       </div>
-
       <div class="row" style="margin-top:8px">
-        <select id="accSelect" class="grow"></select>
-        <label class="switch"><input id="allToggle" type="checkbox"> 全アカウント（分散投稿）</label>
+        <select id="accSelect" style="min-width:420px"></select>
         <button onclick="reloadAcc()">更新</button>
-      </div>
-      <div class="muted" style="margin-top:6px">
-        アカウントは <code>accounts.json</code> に保存（UIのみ。GraphAPI接続は本体で実行）。
+        <span class="muted">アカウント選択（背景は番号に連動）</span>
       </div>
     </div>
   </div>
 
-  <!-- 素材一覧 -->
+  <!-- 素材一覧（サムネ + テキストのみ） -->
   <div class="panel">
-    <div class="panel-hd">overlay_input の素材一覧（D&Dで順序変更、右列ダブルクリックでテキスト編集、サムネダブルクリックで拡大）</div>
+    <div class="panel-hd">overlay_input の素材（行タップで選択／行DnDで順序変更／右列入力でコメント編集）</div>
     <div class="panel-bd">
       <div class="row" style="margin-bottom:8px">
         <form action="/upload?target=overlay" method="post" enctype="multipart/form-data" class="row">
           <input type="file" name="file" accept="image/*,video/*" required>
-          <button>+素材追加…（外部選択→移動）</button>
+          <button>＋素材追加（iPhoneから）</button>
         </form>
-        <form class="right" action="/upload?target=backgrounds" method="post" enctype="multipart/form-data">
-          <input type="file" name="file" accept="video/*" required>
-          <button>背景追加</button>
-        </form>
+        <div class="note">テキストが空の行は、投稿時に <code>random_texts.txt</code> からランダムに選ばれます。</div>
       </div>
 
       <table>
         <thead>
           <tr>
             <th style="width:34px;"></th>
-            <th style="width:120px;">サムネ</th>
-            <th>ファイル名</th>
-            <th style="width:40%;">テキスト（空ならランダム）</th>
-            <th style="width:160px;"></th>
+            <th style="width:130px;">サムネ</th>
+            <th>テキスト（空ならランダム）</th>
+            <th style="width:120px;"></th>
           </tr>
         </thead>
         <tbody id="tbl">
           {% for item in ov_rows %}
           <tr data-fname="{{ item.name }}">
             <td class="handle">☰</td>
-            <td>
+            <td onclick="toggleSelect(this.closest('tr'))">
               {% if item.thumb %}
-                <img class="thumb" src="/{{ item.thumb }}" ondblclick="location.href='{{ url_for('preview', kind='overlay_input', filename=item.name) }}'">
+                <img class="thumb" src="/{{ item.thumb }}" ondblclick="openPreview('{{ item.name }}')">
               {% else %}
-                <div class="muted" style="width:90px;height:90px;border:1px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center">N/A</div>
+                <div class="thumb" style="display:flex;align-items:center;justify-content:center;color:#aaa">N/A</div>
               {% endif %}
             </td>
-            <td class="filename">{{ item.name }}</td>
             <td ondblclick="this.querySelector('input').focus()">
-              <input type="text" class="txt" value="{{ item.text|e }}" placeholder="空= random_texts.txt からランダム" style="width:100%">
+              <input type="text" class="txt grow" value="{{ item.text|e }}" placeholder="空= random_texts.txt からランダム" style="width:100%">
             </td>
-            <td class="row" style="justify-content:flex-end">
-              <button type="button" onclick="chooseForCombine('{{ item.name|e }}')">この素材で合成</button>
+            <td class="rowbtns">
               <form action="/materials/delete" method="post" onsubmit="return confirm('削除しますか？')" style="margin:0">
                 <input type="hidden" name="filename" value="{{ item.name|e }}">
                 <button class="danger" type="submit">削除</button>
@@ -128,95 +116,21 @@
           </tr>
           {% endfor %}
           {% if ov_rows|length == 0 %}
-          <tr><td></td><td colspan="4" class="muted">素材がありません。上の「+素材追加…」からアップロードしてください。</td></tr>
+          <tr><td></td><td colspan="3" class="muted">素材がありません。上の「＋素材追加」からアップロードしてください。</td></tr>
           {% endif %}
         </tbody>
       </table>
 
-      <div class="footer">
-        <div class="row">
-          <button class="primary" onclick="saveMaterials()">更新</button>
-          <div class="muted">順序とテキストを保存します（materials_order.json / material_overrides.json）。</div>
-        </div>
-      </div>
+      <div class="muted" style="margin-top:8px">順序と各行のテキストは **自動保存** されます。</div>
     </div>
   </div>
 
-  <!-- 合成設定 -->
-  <div class="panel">
-    <div class="panel-hd">合成（今のツール準拠）</div>
+  <!-- ランダムテキスト -->
+  <div class="panel hidden" id="panelRand">
+    <div class="panel-hd">ランダムテキスト（入力すると自動保存）</div>
     <div class="panel-bd">
-      <form action="/combine" method="post" class="row" style="gap:12px;align-items:flex-end;">
-        <div>
-          <label>背景</label><br>
-          <select name="background" required>
-            {% for name, _ in bg_rows %}
-              <option value="{{ name }}">{{ name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label>素材</label><br>
-          <select id="overlaySelect" name="overlay" required>
-            {% for item in ov_rows %}
-              <option value="{{ item.name }}">{{ item.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label>位置</label><br>
-          <select name="pos">
-            <option value="top-right">右上</option>
-            <option value="top-left">左上</option>
-            <option value="bottom-right">右下</option>
-            <option value="bottom-left">左下</option>
-            <option value="center">中央</option>
-          </select>
-        </div>
-        <div>
-          <label>サイズ(%)</label><br>
-          <input type="text" name="size_pct" value="50" style="width:90px">
-        </div>
-        <div>
-          <label>長さ</label><br>
-          <select name="duration_mode">
-            <option value="shortest">短い方に合わせる</option>
-            <option value="background">背景に合わせる</option>
-          </select>
-        </div>
-        <div>
-          <label>フェードイン(s)</label><br>
-          <input type="text" name="fadein" value="0" style="width:90px">
-        </div>
-        <div style="width:100%"></div>
-        <div><label><input type="checkbox" name="text_enable" checked> テキスト（有効時）</label></div>
-        <div>
-          <label>テキストモード</label><br>
-          <select name="text_mode">
-            <option value="custom">素材のテキスト/入力を使う</option>
-            <option value="random">ランダム</option>
-          </select>
-        </div>
-        <div>
-          <label>（任意）テキスト入力</label><br>
-          <input type="text" name="text_input" placeholder="ここに入れると最優先" style="width:260px">
-        </div>
-        <div>
-          <label>テキスト位置</label><br>
-          <select name="text_pos">
-            <option value="top-left">左上</option>
-            <option value="top-right">右上</option>
-            <option value="bottom-left">左下</option>
-            <option value="bottom-right">右下</option>
-            <option value="center">中央</option>
-          </select>
-        </div>
-        <div>
-          <label>テキストサイズ</label><br>
-          <input type="text" name="text_size" value="64" style="width:90px">
-        </div>
-        <div><button class="primary" type="submit">選択生成</button></div>
-      </form>
+      <textarea id="randArea" class="grow" style="width:100%;height:50vh" placeholder="1行1テキストで入力"></textarea>
+      <div class="muted" style="margin-top:6px">保存しました：<span id="randSaved">未保存</span></div>
     </div>
   </div>
 
@@ -226,85 +140,133 @@
     <div class="panel-bd">
       <div class="muted" id="status">待機中</div>
       <div class="progress" style="margin-top:8px"><div class="bar" id="bar"></div></div>
-      <div class="footer" style="display:flex;gap:8px;justify-content:flex-end">
-        <button disabled>停止</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 出力＆投稿 -->
-  <div class="panel">
-    <div class="panel-hd">出力（output）</div>
-    <div class="panel-bd">
-      <!-- 投稿UI（アカウント選択＋キャプション） -->
-      <div class="row" style="margin-bottom:10px">
-        <select id="postAccount" style="min-width:220px"></select>
-        <input type="text" id="postCaption" placeholder="キャプション（任意）" style="flex:1;min-width:240px">
-      </div>
-
-      <div class="row" style="flex-wrap:wrap;gap:12px">
-        {% for out in outs_rows %}
-          <div style="width:320px">
-            <video controls playsinline preload="metadata" src="{{ url_for('static_passthrough', subpath='output/' ~ out) }}" style="width:100%;border:1px solid #eee;border-radius:6px"></video>
-            <div class="row" style="justify-content:space-between">
-              <div class="muted" style="font-size:12px">{{ out }}</div>
-              <div class="row" style="gap:6px">
-                <button onclick="location.href='{{ url_for('download_output', filename=out) }}'">DL</button>
-                <button class="primary" onclick="publishOutput('{{ out }}')">投稿</button>
-              </div>
-            </div>
-          </div>
-        {% endfor %}
-        {% if outs_rows|length == 0 %}
-          <div class="muted">まだ生成物がありません。</div>
-        {% endif %}
-      </div>
     </div>
   </div>
 
 </div>
 
 <script>
-  // 並べ替え
-  new Sortable(document.getElementById('tbl'), {animation:150, handle:'.handle', ghostClass:'dragging'});
-
-  // 合成セレクトへ反映
-  function chooseForCombine(name){
-    const sel = document.getElementById('overlaySelect');
-    [...sel.options].forEach(o => { if(o.value===name) o.selected = true; });
-    window.scrollTo({top: document.body.scrollHeight, behavior:'smooth'});
+  // タブ
+  const tabPost = document.getElementById('tabPost');
+  const tabRand = document.getElementById('tabRand');
+  const panelPost = document.getElementById('panelPost');
+  const panelRand = document.getElementById('panelRand');
+  function setActive(tab){
+    document.querySelectorAll('.toolbar .tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    panelPost.classList.toggle('hidden', tab !== tabPost);
+    panelRand.classList.toggle('hidden', tab !== tabRand);
   }
+  tabPost.onclick = () => setActive(tabPost);
+  tabRand.onclick = () => { setActive(tabRand); loadRandomTexts(); };
 
-  // 順序 & テキスト保存
+  // 並べ替え
+  const sort = new Sortable(document.getElementById('tbl'), {
+    animation:150, handle:'.handle',
+    onSort: debounce(saveMaterials, 700)
+  });
+
+  // テキスト自動保存
+  document.querySelectorAll('#tbl input.txt').forEach(inp=>{
+    inp.addEventListener('input', debounce(saveMaterials, 700));
+  });
+
   async function saveMaterials(){
     const rows = [...document.querySelectorAll('#tbl tr[data-fname]')];
     const order = rows.map(r => r.dataset.fname);
     const texts = {};
     rows.forEach(r => { texts[r.dataset.fname] = r.querySelector('input.txt').value; });
-    const res = await fetch('/materials/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order,texts})});
-    alert(res.ok ? '更新しました' : '保存に失敗しました');
+    await fetch('/materials/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order,texts})});
   }
 
-  // 疑似バッチ進捗
-  function startBatch(){
-    document.getElementById('status').textContent = '投稿キュー作成中…（UIのみ）';
-    let w=0; const bar=document.getElementById('bar');
-    const t=setInterval(()=>{ w=Math.min(100,w+5); bar.style.width=w+'%'; if(w>=100) clearInterval(t); },100);
+  // 行選択
+  function toggleSelect(tr){
+    tr.classList.toggle('selected');
   }
 
-  // アカウント読込（accSelect と postAccount 両方に反映）
-  async function reloadAcc(){
-    const r = await fetch('/accounts'); const js = await r.json();
-    const sel = document.getElementById('accSelect'); if(sel) sel.innerHTML='';
-    const sel2 = document.getElementById('postAccount'); if(sel2) sel2.innerHTML='';
-    (js.accounts||[]).forEach(a => {
-      const label = `${a.no}. ${a.label} (IG:${a.ig_user_id})`;
-      if(sel){ const opt=document.createElement('option'); opt.value=a.no; opt.textContent=label; sel.appendChild(opt); }
-      if(sel2){ const o2=document.createElement('option'); o2.value=a.no; o2.textContent=label; sel2.appendChild(o2); }
+  // ランダムテキスト 読み込み＆保存
+  let randLoaded=false, randTimer=null;
+  async function loadRandomTexts(){
+    if(randLoaded) return;
+    const r = await fetch('/random_texts_content');
+    const js = await r.json();
+    document.getElementById('randArea').value = js.text || '';
+    randLoaded = true;
+    document.getElementById('randSaved').textContent = '読み込み済み';
+  }
+  const randArea = document.getElementById('randArea');
+  if(randArea){
+    randArea.addEventListener('input', ()=>{
+      clearTimeout(randTimer);
+      randTimer = setTimeout(async ()=>{
+        const body = { body: randArea.value };
+        const res = await fetch('/random_texts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if(res.ok){ document.getElementById('randSaved').textContent = new Date().toLocaleTimeString(); }
+      }, 500);
     });
   }
 
-  // アカウント登録/削除UI（access_token対応）
+  // 投稿（選択行）
+  async function postSelected(){
+    const sel = document.querySelector('#tbl tr.selected');
+    if(!sel){ alert('素材を1つ選択してください（行をタップ）'); return; }
+    const overlay_name = sel.dataset.fname;
+    const account_no = document.getElementById('accSelect').value;
+    await doPost({account_no, overlay_name});
+  }
+
+  // 投稿（バッチ）
+  async function postBatch(){
+    const account_no = document.getElementById('accSelect').value;
+    const statusEl = document.getElementById('status');
+    const bar = document.getElementById('bar');
+    if(statusEl) statusEl.textContent = 'バッチ投稿中…';
+    if(bar) bar.style.width = '10%';
+    const r = await fetch('/batch_generate_and_post',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ account_no, limit: 0 })
+    });
+    const js = await r.json().catch(()=>({}));
+    if(bar) bar.style.width = '100%';
+    if(!r.ok || js.ok === false){
+      alert('一括投稿失敗: ' + (js.error || r.statusText));
+      if(statusEl) statusEl.textContent = 'エラー';
+      return;
+    }
+    alert('一括投稿 完了');
+    if(statusEl) statusEl.textContent = '完了';
+  }
+
+  // 投稿の実処理
+  async function doPost(payload){
+    const statusEl = document.getElementById('status');
+    const bar = document.getElementById('bar');
+    if(statusEl) statusEl.textContent = '投稿中…';
+    if(bar) bar.style.width = '30%';
+    const r = await fetch('/generate_and_post', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const js = await r.json().catch(()=>({}));
+    if(bar) bar.style.width = '100%';
+    if(!r.ok || js.ok === false){
+      alert('投稿失敗: ' + (js.error || r.statusText));
+      if(statusEl) statusEl.textContent = 'エラー';
+      return;
+    }
+    alert('投稿完了！ media_id=' + js.media_id);
+    if(statusEl) statusEl.textContent = '完了';
+  }
+
+  // アカウントAPI
+  async function reloadAcc(){
+    const r = await fetch('/accounts'); const js = await r.json();
+    const sel = document.getElementById('accSelect'); if(sel) sel.innerHTML='';
+    (js.accounts||[]).forEach(a => {
+      const label = `${a.no}. ${a.label||''} (IG:${a.ig_user_id||''})`;
+      const opt=document.createElement('option'); opt.value=a.no; opt.textContent=label; sel.appendChild(opt);
+    });
+  }
   async function upsertAcc(){
     const body = {
       no: document.getElementById('accNo').value.trim(),
@@ -314,35 +276,21 @@
       access_token: document.getElementById('accToken').value.trim()
     };
     const r = await fetch('/accounts/upsert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(r.ok){ alert('保存しました'); reloadAcc(); }
-    else{ alert('保存に失敗'); }
+    if(r.ok){ alert('保存しました'); reloadAcc(); } else { alert('保存に失敗'); }
   }
   async function delAcc(){
     const no = document.getElementById('accNo').value.trim();
     if(!no) return alert('番号を入れてください');
     const r = await fetch('/accounts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({no})});
-    if(r.ok){ alert('削除しました'); reloadAcc(); }
-    else{ alert('削除に失敗'); }
+    if(r.ok){ alert('削除しました'); reloadAcc(); } else { alert('削除に失敗'); }
   }
   function tokenRefresh(){ alert('トークン更新（API連携は本体側で）'); }
-  function tokenCheck(){ alert('トークン有効期限チェック（API連携は本体側で）'); }
+  function tokenCheck(){ alert('有効期限チェック（API連携は本体側で）'); }
 
-  // 出力の投稿
-  async function publishOutput(filename){
-    const accSel = document.getElementById('postAccount');
-    if(!accSel || !accSel.value) return alert('投稿アカウントを選択してください');
-    const caption = document.getElementById('postCaption') ? document.getElementById('postCaption').value : '';
-    const body = { account_no: accSel.value, filename: filename, caption: caption };
-    const res = await fetch('/publish', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    const js = await res.json().catch(()=>({}));
-    if(res.ok && js.ok){
-      alert('投稿成功！' + (js.permalink ? `\n${js.permalink}` : ''));
-    }else{
-      alert('投稿失敗: ' + (js.error ? JSON.stringify(js.error) : res.status));
-    }
-  }
+  function openPreview(name){ window.open(`/preview/overlay_input/${encodeURIComponent(name)}`,'_blank'); }
+  function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn.apply(this,a),ms); }; }
 
-  // 初期ロード
+  // 初期
   reloadAcc();
 </script>
 </body>
