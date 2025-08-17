@@ -1,3 +1,7 @@
 .env
 logs/
 overlay_input/
+*.bak
+*.bak
+*.bak
+*.bak
