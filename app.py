@@ -2,11 +2,11 @@ import streamlit as st
 import os
 from pathlib import Path
 from poster_core_reel import PosterCoreReel, SUPPORTED_EXTS
-from moviepy.editor import VideoFileClip  # moviepy==1.0.3 で動作確認
+from moviepy.editor import VideoFileClip
 import random
 import datetime
 
-# ランダムコメントを random_texts.txt から読み込む
+# ランダムテキストを random_texts.txt から読み込む
 with open("random_texts.txt", "r", encoding="utf-8") as f:
     random_texts = [line.strip() for line in f if line.strip()]
 
@@ -20,7 +20,6 @@ def _refresh_materials():
         if Path(f).suffix.lower() in SUPPORTED_EXTS:
             file_path = os.path.join(material_dir, f)
             size_kb = os.path.getsize(file_path) / 1024
-            # サムネイル生成
             thumbnail = None
             if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")):
                 thumbnail = file_path
@@ -32,7 +31,6 @@ def _refresh_materials():
                         thumbnail = thumb_path
                 except Exception as e:
                     st.warning(f"{f} のサムネイル生成に失敗: {e}")
-            # コメント（空の場合はランダム選択、session_state で保存）
             comment_key = f"{f}_comment"
             comment = st.session_state.get(comment_key, "")
             if not comment and random_texts:
@@ -43,74 +41,77 @@ def _refresh_materials():
 # カスタム CSS
 st.markdown("""
     <style>
-    .upload-box {
-        border: 2px dashed #4CAF50;
+    .main {
+        background: linear-gradient(135deg, #f0f4f8, #e0e8f0);
         padding: 20px;
-        background-color: #f9f9f9;
         border-radius: 10px;
-        text-align: center;
     }
-    .material-row {
-        display: flex;
-        align-items: center;
-        margin-bottom: 10px;
+    .upload-box {
+        border: 2px dashed #ff6b6b;
+        padding: 30px;
+        background-color: #fff;
+        border-radius: 15px;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+    .upload-box.dragover {
+        background-color: #ffebee;
+        border-color: #ff3333;
+    }
+    .material-card {
+        background: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 15px;
+        transition: transform 0.2s;
+    }
+    .material-card:hover {
+        transform: translateY(-5px);
     }
     .material-thumbnail {
-        width: 100px;
-        height: 100px;
+        width: 120px;
+        height: 120px;
         object-fit: cover;
-        margin-right: 10px;
+        border-radius: 8px;
+    }
+    .comment-area {
+        background: #fff3e6;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #ff9800;
     }
     .stButton > button {
-        background-color: #4CAF50;
+        background-color: #ff6b6b;
         color: white;
-        border-radius: 5px;
+        border-radius: 8px;
+        padding: 5px 15px;
+        transition: background-color 0.3s;
+    }
+    .stButton > button:hover {
+        background-color: #ff4040;
     }
     </style>
 """, unsafe_allow_html=True)
 
 def main():
-    st.title("Reel Poster App")
-    
-    # 2列レイアウト
-    col1, col2 = st.columns([2, 1])
-    
-    # 素材リスト（左側）
+    st.markdown('<div class="main">', unsafe_allow_html=True)
+    st.title("Reel Poster App 🎥")
+
+    # 2列レイアウト（アップロードを左、素材リストを右）
+    col1, col2 = st.columns([1, 2])
+
+    # 素材アップロード（左側）
     with col1:
-        st.subheader("素材リスト")
-        materials = _refresh_materials()
-        if materials:
-            for material in materials:
-                with st.container():
-                    st.markdown('<div class="material-row">', unsafe_allow_html=True)
-                    if material["Thumbnail"]:
-                        st.image(material["Thumbnail"], caption=material["File Name"], use_column_width=False, width=100)
-                    else:
-                        st.write(f"サムネイルなし: {material['File Name']}")
-                    col_comment, col_action = st.columns([3, 1])
-                    with col_comment:
-                        comment_key = f"{material['File Name']}_comment"
-                        comment = st.text_input("コメント", value=material["Comment"], key=comment_key)
-                        st.session_state[comment_key] = comment  # 入力値を保存
-                    with col_action:
-                        if st.button("削除", key=f"delete_{material['File Name']}"):
-                            os.remove(os.path.join(os.getenv("PERSISTENT_DIR", "./"), "overlay_input", material["File Name"]))
-                            if material["Thumbnail"] and os.path.exists(material["Thumbnail"]):
-                                os.remove(material["Thumbnail"])
-                            st.success(f"{material['File Name']} を削除しました")
-                            st.rerun()
-        else:
-            st.write("素材がありません")
-    
-    # 素材アップロード（右側）
-    with col2:
         st.subheader("素材アップロード")
-        with st.container():
-            st.markdown('<div class="upload-box">ドラッグ＆ドロップでアップロード</div>', unsafe_allow_html=True)
+        upload_container = st.empty()
+        with upload_container.container():
+            st.markdown('<div class="upload-box" id="upload-drop">ドラッグ＆ドロップでアップロード</div>', unsafe_allow_html=True)
             uploaded_files = st.file_uploader(
                 "ファイルを選択（200MBまで）",
                 accept_multiple_files=True,
                 type=[ext[1:] for ext in SUPPORTED_EXTS],
+                key="file_uploader"
             )
             if uploaded_files:
                 material_dir = os.path.join(os.getenv("PERSISTENT_DIR", "./"), "overlay_input")
@@ -119,6 +120,42 @@ def main():
                         f.write(file.getbuffer())
                     st.success(f"{file.name} をアップロードしました")
                 st.rerun()
+
+    # 素材リスト（右側）
+    with col2:
+        st.subheader("素材リスト")
+        materials = _refresh_materials()
+        if materials:
+            for material in materials:
+                with st.container():
+                    st.markdown('<div class="material-card">', unsafe_allow_html=True)
+                    col_thumb, col_info = st.columns([1, 2])
+                    with col_thumb:
+                        if material["Thumbnail"]:
+                            st.image(material["Thumbnail"], caption=material["File Name"], use_column_width=False, width=120, output_format="auto")
+                        else:
+                            st.write(f"サムネイルなし: {material['File Name']}")
+                    with col_info:
+                        st.markdown('<div class="comment-area">', unsafe_allow_html=True)
+                        comment_key = f"{material['File Name']}_comment"
+                        comment = st.text_area("コメント", value=material["Comment"], key=comment_key, height=100)
+                        st.session_state[comment_key] = comment
+                        st.write(f"サイズ: {material['Size']}")
+                        if st.button("保存", key=f"save_{material['File Name']}"):
+                            st.session_state[comment_key] = comment
+                            st.success("コメントが保存されました")
+                        if st.button("削除", key=f"delete_{material['File Name']}"):
+                            os.remove(os.path.join(os.getenv("PERSISTENT_DIR", "./"), "overlay_input", material["File Name"]))
+                            if material["Thumbnail"] and os.path.exists(material["Thumbnail"]):
+                                os.remove(material["Thumbnail"])
+                            st.success(f"{material['File Name']} を削除しました")
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.write("素材がありません")
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
