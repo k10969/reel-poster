@@ -1,3 +1,4 @@
+
 import streamlit as st
 import os
 from pathlib import Path
@@ -42,12 +43,12 @@ def _refresh_materials():
 st.markdown("""
     <style>
     .main {
-        background: linear-gradient(135deg, #f0f4f8, #e0e8f0);
+        background: linear-gradient(135deg, #e3f2fd, #bbdefb);
         padding: 20px;
         border-radius: 10px;
     }
     .upload-box {
-        border: 2px dashed #ff6b6b;
+        border: 2px dashed #42a5f5;
         padding: 30px;
         background-color: #fff;
         border-radius: 15px;
@@ -55,8 +56,8 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     .upload-box.dragover {
-        background-color: #ffebee;
-        border-color: #ff3333;
+        background-color: #e3f2fd;
+        border-color: #1976d2;
     }
     .material-card {
         background: #ffffff;
@@ -76,20 +77,20 @@ st.markdown("""
         border-radius: 8px;
     }
     .comment-area {
-        background: #fff3e6;
+        background: #e8f5e9;
         padding: 10px;
         border-radius: 8px;
-        border: 1px solid #ff9800;
+        border: 1px solid #66bb6a;
     }
     .stButton > button {
-        background-color: #ff6b6b;
+        background-color: #42a5f5;
         color: white;
         border-radius: 8px;
         padding: 5px 15px;
         transition: background-color 0.3s;
     }
     .stButton > button:hover {
-        background-color: #ff4040;
+        background-color: #1976d2;
     }
     </style>
 """, unsafe_allow_html=True)
