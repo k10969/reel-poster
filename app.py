@@ -1,4 +1,3 @@
-
 import streamlit as st
 import os
 from pathlib import Path
@@ -39,6 +38,28 @@ def _refresh_materials():
             materials.append({"File Name": f, "Size": f"{size_kb:.1f} KB", "Thumbnail": thumbnail, "Comment": comment})
     return materials
 
+# アカウントを管理する関数
+def _manage_accounts():
+    accounts = st.session_state.get("accounts", [])
+    st.subheader("アカウント管理")
+    new_account = st.text_input("新しいアカウントのトークンを入力", key="new_account_token")
+    if st.button("アカウントを追加"):
+        if new_account and new_account not in accounts:
+            accounts.append(new_account)
+            st.session_state["accounts"] = accounts
+            st.success(f"アカウント {new_account} を追加しました")
+    st.write("登録済みアカウント:")
+    for i, account in enumerate(accounts):
+        col_acc, col_del = st.columns([3, 1])
+        with col_acc:
+            st.write(account)
+        with col_del:
+            if st.button("削除", key=f"del_account_{i}"):
+                accounts.remove(account)
+                st.session_state["accounts"] = accounts
+                st.success(f"アカウント {account} を削除しました")
+                st.rerun()
+
 # カスタム CSS
 st.markdown("""
     <style>
@@ -71,8 +92,8 @@ st.markdown("""
         transform: translateY(-5px);
     }
     .material-thumbnail {
-        width: 120px;
-        height: 120px;
+        width: 150px;
+        height: 150px;
         object-fit: cover;
         border-radius: 8px;
     }
@@ -81,6 +102,13 @@ st.markdown("""
         padding: 10px;
         border-radius: 8px;
         border: 1px solid #66bb6a;
+    }
+    .account-card {
+        background: #ffffff;
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
     .stButton > button {
         background-color: #42a5f5;
@@ -99,7 +127,7 @@ def main():
     st.markdown('<div class="main">', unsafe_allow_html=True)
     st.title("Reel Poster App 🎥")
 
-    # 2列レイアウト（アップロードを左、素材リストを右）
+    # 2列レイアウト
     col1, col2 = st.columns([1, 2])
 
     # 素材アップロード（左側）
@@ -133,7 +161,7 @@ def main():
                     col_thumb, col_info = st.columns([1, 2])
                     with col_thumb:
                         if material["Thumbnail"]:
-                            st.image(material["Thumbnail"], caption=material["File Name"], use_column_width=False, width=120, output_format="auto")
+                            st.image(material["Thumbnail"], caption=material["File Name"], use_column_width=False, width=150, output_format="auto")
                         else:
                             st.write(f"サムネイルなし: {material['File Name']}")
                     with col_info:
@@ -155,6 +183,10 @@ def main():
                     st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.write("素材がありません")
+
+    # アカウント管理（別タブやボタンで実装可、今回は簡略化）
+    if st.button("アカウント管理を開く"):
+        _manage_accounts()
 
     st.markdown('</div>', unsafe_allow_html=True)
 
