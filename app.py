@@ -127,11 +127,11 @@ def main():
     st.markdown('<div class="main">', unsafe_allow_html=True)
     st.title("Reel Poster App 🎥")
 
-    # 2列レイアウト
-    col1, col2 = st.columns([1, 2])
+    # タブレイアウト
+    tab1, tab2, tab3 = st.tabs(["アップロード", "素材リスト", "アカウント管理"])
 
-    # 素材アップロード（左側）
-    with col1:
+    # アップロードタブ
+    with tab1:
         st.subheader("素材アップロード")
         upload_container = st.empty()
         with upload_container.container():
@@ -150,8 +150,8 @@ def main():
                     st.success(f"{file.name} をアップロードしました")
                 st.rerun()
 
-    # 素材リスト（右側）
-    with col2:
+    # 素材リストタブ
+    with tab2:
         st.subheader("素材リスト")
         materials = _refresh_materials()
         if materials:
@@ -184,8 +184,8 @@ def main():
         else:
             st.write("素材がありません")
 
-    # アカウント管理（別タブやボタンで実装可、今回は簡略化）
-    if st.button("アカウント管理を開く"):
+    # アカウント管理タブ
+    with tab3:
         _manage_accounts()
 
     st.markdown('</div>', unsafe_allow_html=True)
